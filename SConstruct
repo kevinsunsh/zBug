@@ -14,6 +14,10 @@ if not os.path.exists('llvm'):
   print "No 'llvm' folder found!"
   sys.exit(1)
 
+if os.path.exists('dist'):
+  print "Please delete the existing 'dist' folder."
+  sys.exit(1)
+
 env = Environment(
   ENV = {
     'PATH': os.environ['PATH'],
@@ -146,6 +150,14 @@ mkbin = env.Command(
 )
 env.Depends(mkbin, cpzBug)
 zipFiles.append(mkbin)
+
+cprsrc = env.Command(
+  stageDir.Dir('rsrc'),
+  env.Dir('rsrc'),
+  [['cp', '-a', "$SOURCE", "$TARGET"]]
+)
+env.Depends(cprsrc, cpzBug)
+zipFiles.append(cprsrc)
 
 cppython = env.Command(
   stageDir.Dir('python'),
