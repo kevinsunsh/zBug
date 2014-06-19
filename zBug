@@ -420,74 +420,6 @@ sourceCodeDisplayWidget = SourceCodeDisplayWidget()
 sourceCodeDisplayWidget.setFocusPolicy(QtCore.Qt.NoFocus)
 sourceCodeDisplayWidget.setMinimumSize(640, 480)
 
-class DisassemblyDisplayWidget(CodeDisplayWidget):
-  def __init__(self):
-    CodeDisplayWidget.__init__(self)
-
-  def saveState(self, settings):
-    pass
-
-  def restoreState(self, settings):
-    pass
-
-  def frame(self):
-    return self.__frame
-
-  def setFrame(self, frame):
-    self.__frame = frame
-    pc = frame.GetPC()
-    pcAddress = frame.GetPCAddress()
-
-    thread = frame.GetThread()
-    process = thread.GetProcess()
-    target = process.GetTarget()
-
-    function = frame.GetFunction()
-    if function:
-      instructions = function.GetInstructions(target)
-    else:
-      symbol = frame.GetSymbol()
-      if symbol:
-        instructions = symbol.GetInstructions(target)
-      else:
-        data = lldb.SBData()
-        error = lldb.SBError()
-        data = bytearray(frame.GetThread().GetProcess().ReadMemory(pc, 1024, error))
-        instructions = target.GetInstructions(pcAddress, data)
-
-    self.clear()
-    count = instructions.GetSize()
-    contents = []
-    lineCount = 0
-    lineNumberToHighlight = None
-    for i in range(0, count):
-      instruction = instructions.GetInstructionAtIndex(i)
-      address = instruction.GetAddress()
-      loadAddress = address.GetLoadAddress(target)
-      if loadAddress < pc - 256 or loadAddress > pc + 256:
-        continue
-      if loadAddress == pc:
-        lineNumberToHighlight = lineCount
-      mnemonic = instruction.GetMnemonic(target)
-      operands =  instruction.GetOperands(target)
-      comment =  instruction.GetComment(target)
-      desc = "%-8s %s" % (mnemonic, operands)
-      if comment:
-        if len(desc) < 32:
-          desc += ' ' * (32 - len(desc))
-        desc += "; %s" % comment
-      contents.append(["%#x" % loadAddress, desc])
-      lineCount += 1
-    self.setContents(contents)
-
-    if lineNumberToHighlight != None:
-      self.highlightLine(lineNumberToHighlight)
-    else:
-      self.setExtraSelections([])
-
-disassemblyDisplayWidget = DisassemblyDisplayWidget()
-disassemblyDisplayWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, includeExtras):
     QtGui.QTreeWidgetItem.__init__(self)
@@ -785,17 +717,18 @@ class StackWidgetItem(QtGui.QTreeWidgetItem):
     self.setFont(2, fixedFont)
 
 class StackWidget(TreeWidget):
+
+  frameChanged = QtCore.Signal(lldb.SBFrame)
+
   def __init__(
     self,
     sourceCodeDisplayWidget,
-    disassemblyDisplayWidget,
     localsWidget,
     registersWidget
     ):
     TreeWidget.__init__(self, "stack")
 
     self.__sourceCodeDisplayWidget = sourceCodeDisplayWidget
-    self.__disassemblyDisplayWidget = disassemblyDisplayWidget
     self.__localsWidget = localsWidget
     self.__registersWidget = registersWidget
 
@@ -821,10 +754,10 @@ class StackWidget(TreeWidget):
           thread.SetSelectedFrame(frameIndex)
 
           frame = thread.GetFrameAtIndex(frameIndex)
+          self.frameChanged.emit(frame)
           self.__sourceCodeDisplayWidget.updateDisplayForLineEntry(
             frame.GetLineEntry()
             )
-          self.__disassemblyDisplayWidget.setFrame(frame)
     self.__localsWidget.setFrame(frame)
     self.__registersWidget.setFrame(frame)
 
@@ -871,7 +804,6 @@ class StackWidget(TreeWidget):
 
 stackWidget = StackWidget(
   sourceCodeDisplayWidget,
-  disassemblyDisplayWidget,
   localsWidget,
   registersWidget
   )
@@ -1344,6 +1276,121 @@ lldbCommandWidget = LLDBCommandWidget(
   lldbDisplay
   )
 
+class DisassemblyWidget(QtGui.QWidget):
+
+  class Code(CodeDisplayWidget):
+    def __init__(self):
+      CodeDisplayWidget.__init__(self)
+
+    def saveState(self, settings):
+      pass
+
+    def restoreState(self, settings):
+      pass
+
+    def frame(self):
+      return self.__frame
+
+    def setFrame(self, frame):
+      self.__frame = frame
+      pc = frame.GetPC()
+      pcAddress = frame.GetPCAddress()
+
+      thread = frame.GetThread()
+      process = thread.GetProcess()
+      target = process.GetTarget()
+
+      function = frame.GetFunction()
+      if function:
+        instructions = function.GetInstructions(target)
+      else:
+        symbol = frame.GetSymbol()
+        if symbol:
+          instructions = symbol.GetInstructions(target)
+        else:
+          data = lldb.SBData()
+          error = lldb.SBError()
+          data = bytearray(frame.GetThread().GetProcess().ReadMemory(pc, 1024, error))
+          instructions = target.GetInstructions(pcAddress, data)
+
+      self.clear()
+      count = instructions.GetSize()
+      contents = []
+      lineCount = 0
+      lineNumberToHighlight = None
+      for i in range(0, count):
+        instruction = instructions.GetInstructionAtIndex(i)
+        address = instruction.GetAddress()
+        loadAddress = address.GetLoadAddress(target)
+        if loadAddress < pc - 256 or loadAddress > pc + 256:
+          continue
+        if loadAddress == pc:
+          lineNumberToHighlight = lineCount
+        mnemonic = instruction.GetMnemonic(target)
+        operands =  instruction.GetOperands(target)
+        comment =  instruction.GetComment(target)
+        desc = "%-8s %s" % (mnemonic, operands)
+        if comment:
+          if len(desc) < 32:
+            desc += ' ' * (32 - len(desc))
+          desc += "; %s" % comment
+        contents.append(["%#x" % loadAddress, desc])
+        lineCount += 1
+      self.setContents(contents)
+
+      if lineNumberToHighlight != None:
+        self.highlightLine(lineNumberToHighlight)
+      else:
+        self.setExtraSelections([])
+
+  def __init__(self, lldbCommandWidget):
+    QtGui.QWidget.__init__(self)
+
+    self.__code = DisassemblyWidget.Code()
+
+    layout = QtGui.QVBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    
+    toolBar = QtGui.QToolBar()
+    self.__continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
+    def continueCallback():
+      lldbCommandWidget.executeCommand("process continue")
+    self.__continueAction.triggered.connect(continueCallback)
+    self.__stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
+    def stepInCallback():
+      lldbCommandWidget.executeCommand("thread step-inst")
+    self.__stepInAction.triggered.connect(stepInCallback)
+    self.__stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
+    def stepOverCallback():
+      lldbCommandWidget.executeCommand("thread step-inst-over")
+    self.__stepOverAction.triggered.connect(stepOverCallback)
+    self.__stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
+    def stepOutCallback():
+      lldbCommandWidget.executeCommand("thread step-out")
+    self.__stepOutAction.triggered.connect(stepOutCallback)
+    layout.addWidget(toolBar)
+
+    layout.addWidget(self.__code)
+
+    self.setLayout(layout)
+
+  def frame(self):
+    return self.__code.frame()
+
+  def setFrame(self, frame):
+    self.__code.setFrame(frame)
+
+  def saveState(self, settings):
+    self.__code.saveState(settings)
+
+  def restoreState(self, settings):
+    self.__code.restoreState(settings)
+
+disassemblyWidget = DisassemblyWidget(lldbCommandWidget)
+disassemblyWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+stackWidget.frameChanged.connect(disassemblyWidget.setFrame)
+
 class WatchpointsWidget(QtGui.QWidget):
 
   class Item(QtGui.QTreeWidgetItem):
@@ -1578,13 +1625,13 @@ class MainWindow(QtGui.QMainWindow):
     sourcesWidget_dockWidget.setWidget(sourcesWidget)
     self.addDockWidget(QtCore.Qt.RightDockWidgetArea, sourcesWidget_dockWidget)
 
-    disassemblyDisplayWidget.restoreState(settings)
-    disassemblyDisplayWidget_dockWidget = QtGui.QDockWidget()
-    disassemblyDisplayWidget_dockWidget.setObjectName("Disassembly")
-    disassemblyDisplayWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
-    disassemblyDisplayWidget_dockWidget.setWindowTitle("Disassembly")
-    disassemblyDisplayWidget_dockWidget.setWidget(disassemblyDisplayWidget)
-    self.addDockWidget(QtCore.Qt.RightDockWidgetArea, disassemblyDisplayWidget_dockWidget)
+    disassemblyWidget.restoreState(settings)
+    disassemblyWidget_dockWidget = QtGui.QDockWidget()
+    disassemblyWidget_dockWidget.setObjectName("Disassembly")
+    disassemblyWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
+    disassemblyWidget_dockWidget.setWindowTitle("Disassembly")
+    disassemblyWidget_dockWidget.setWidget(disassemblyWidget)
+    self.addDockWidget(QtCore.Qt.RightDockWidgetArea, disassemblyWidget_dockWidget)
 
     # lldbWidget.restoreState(settings)
     lldbWidget_dockWidget = QtGui.QDockWidget()
@@ -1631,7 +1678,7 @@ class MainWindow(QtGui.QMainWindow):
     breakpointsWidget.saveState(settings)
     outputWidget.saveState(settings)
     # lldbWidget.saveState(settings)
-    disassemblyDisplayWidget.saveState(settings)
+    disassemblyWidget.saveState(settings)
     sourcesWidget.saveState(settings)
     threadsWidget.saveState(settings)
     stackWidget.saveState(settings)
