@@ -54,8 +54,192 @@ except ImportError:
     print "error: couldn't locate the 'lldb' module, please set PYTHONPATH correctly"
     sys.exit(1)
 
-debugger = lldb.SBDebugger.Create()
-debugger.SetAsync(True)
+class Debugger(QtCore.QObject):
+
+  targetChanged = QtCore.Signal(lldb.SBTarget)
+  processChanged = QtCore.Signal(lldb.SBProcess)
+  processRunning = QtCore.Signal(lldb.SBProcess)
+  processStopped = QtCore.Signal(lldb.SBProcess)
+  processExited = QtCore.Signal(lldb.SBProcess)
+  threadChanged = QtCore.Signal(lldb.SBThread)
+  frameChanged = QtCore.Signal(lldb.SBFrame)
+
+  def __init__(self):
+    QtCore.QObject.__init__(self)
+
+    self.__debugger = lldb.SBDebugger.Create()
+    self.__debugger.SetAsync(True)
+
+    self.__target = None
+    self.__process = None
+    self.__thread = None
+    self.__frame = None
+
+    # [andrew 20140124] for LLDB's own logging messages, enabling different types of these
+    # is done via the console using "log enable <type> <subtype/all>"
+    def logToStdout(msg):
+      sys.stdout.write(msg)
+      sys.stdout.flush()
+    self.__debugger.SetLoggingCallback(logToStdout)
+
+  def commandInterpreter(self):
+    return self.__debugger.GetCommandInterpreter()
+
+  def target(self):
+    return self.__target
+
+  def process(self):
+    return self.__process
+
+  def thread(self):
+    return self.__thread
+
+  def frame(self):
+    return self.__frame
+
+  def setFrame(self, frameIndex):
+    frame = self.__thread.SetSelectedFrame(frameIndex)
+    frameChanged = frame != self.__frame
+    self.__frame = frame
+    if frameChanged:
+      self.frameChanged.emit(frame)
+
+  def handleEvents(self):
+    event = lldb.SBEvent()
+    listener = self.__debugger.GetListener()
+    while listener.GetNextEvent(event):
+      # stream = lldb.SBStream()
+      # event.GetDescription(stream)
+      # print stream.GetData()
+
+      if event.GetBroadcaster().GetName() == "lldb.process":
+        target = self.__debugger.GetSelectedTarget()
+        targetChanged = self.__target != target
+        self.__target = target
+        if targetChanged:
+          self.__process = None
+          self.__thread = None
+          self.__frame = None
+
+        process = target.GetProcess()
+        processChanged = self.__process != process
+        self.__process = process
+        if processChanged:
+          self.__thread = None
+          self.__frame = None
+
+        process_stdout = process.GetSTDOUT(1024)
+        if process_stdout:
+          outputWidget.appendStdout(process_stdout)
+          while process_stdout:
+            process_stdout = process.GetSTDOUT(1024)
+            outputWidget.appendStdout(process_stdout)
+        process_stderr = process.GetSTDERR(1024)
+        if process_stderr:
+          outputWidget.appendStderr(process_stderr)
+          while process_stderr:
+            process_stderr = process.GetSTDERR(1024)
+            outputWidget.appendStderr(process_stderr)
+
+        threadChanged = False
+        frameChanged = False
+        processStopped = False
+        processRunning = False
+        processExited = False
+        state = lldb.SBProcess.GetStateFromEvent(event)
+        if state == lldb.eStateInvalid:
+          # Not a state event
+          print 'process event = %s' % (event)
+        else:
+          if state == lldb.eStateStopped:
+            didSelectThread = False
+            for thread in process:
+              frame = thread.GetFrameAtIndex(0)
+
+              shouldSelectThread = False
+              shouldDisplay = False
+
+              stopReason = thread.GetStopReason()
+              # if self.verbose:
+              #   desc = "tid = %#x pc = %#x " % (thread.GetThreadID(),frame.GetPC()),
+              if stopReason == lldb.eStopReasonNone:
+                pass
+              elif stopReason == lldb.eStopReasonTrace:
+                shouldSelectThread = True
+                shouldDisplay = True
+              elif stopReason == lldb.eStopReasonPlanComplete:
+                shouldSelectThread = True
+              # elif stopReason == lldb.eStopReasonThreadExiting:
+              #   lldbDisplay.appendDebuggerOutput("Stop: thread exiting\n")
+              elif stopReason == lldb.eStopReasonExec:
+                shouldDisplay = True
+              elif stopReason == lldb.eStopReasonInvalid:
+                pass
+              elif stopReason == lldb.eStopReasonException:
+                shouldSelectThread = True
+                shouldDisplay = True
+              elif stopReason == lldb.eStopReasonBreakpoint:
+                shouldSelectThread = True
+                shouldDisplay = True
+              elif stopReason == lldb.eStopReasonWatchpoint:
+                shouldSelectThread = True
+                shouldDisplay = True
+              elif stopReason == lldb.eStopReasonSignal:
+                shouldSelectThread = True
+                shouldDisplay = True
+
+              if shouldDisplay:
+                lldbDisplay.appendDebuggerOutput("STOP %s\n" % thread.GetStopDescription(256))
+
+              if shouldSelectThread and not didSelectThread:
+                threadChanged = self.__thread != thread
+                self.__thread = thread
+
+                frameChanged = self.__frame != frame
+                self.__frame = frame
+
+                didSelectThread = True
+            processStopped = True
+          elif state == lldb.eStateExited:
+            processExited = True
+            exit_desc = process.GetExitDescription()
+            if exit_desc:
+              lldbDisplay.appendDebuggerOutput("Process %u exited with status %u: %s\n" % (process.GetProcessID(), process.GetExitStatus(), exit_desc))
+            else:
+              lldbDisplay.appendDebuggerOutput("Process %u exited with status %u\n" % (process.GetProcessID(), process.GetExitStatus()))
+          elif state == lldb.eStateCrashed:
+            lldbDisplay.appendDebuggerOutput("Process %u crashed" % process.GetProcessID())
+          elif state == lldb.eStateDetached:
+            lldbDisplay.appendDebuggerOutput("Process %u detached" % process.GetProcessID())
+          elif state == lldb.eStateRunning:
+            processRunning = True
+          elif state == lldb.eStateUnloaded:
+            lldbDisplay.appendDebuggerOutput("Process %u unloaded, this shouldn't happen!!!" % process.GetProcessID())
+          elif state == lldb.eStateConnected:
+            pass
+          elif state == lldb.eStateAttaching:
+            pass
+          elif state == lldb.eStateLaunching:
+            pass
+
+        if targetChanged:
+          self.targetChanged.emit(self.__target)
+        if processChanged:
+          self.processChanged.emit(self.__process)
+        if threadChanged:
+          self.threadChanged.emit(self.__thread)
+        if frameChanged:
+          self.frameChanged.emit(self.__frame)
+        if processStopped:
+          self.processStopped.emit(self.__process)
+        if processRunning:
+          self.processRunning.emit(self.__process)
+        if processExited:
+          self.processExited.emit(self.__process)
+      else:
+        print 'Non-process event = %s' % (event)
+
+debugger = Debugger()
 
 app = QtGui.QApplication([])
 app.setOrganizationName("zBug")
@@ -242,8 +426,8 @@ class CodeDisplayWidget(QtGui.QPlainTextEdit):
     self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
 
 class SourceCodeDisplayWidget(QtGui.QPlainTextEdit):
-  def __init__(self, parent=None):
-    QtGui.QPlainTextEdit.__init__(self, parent)
+  def __init__(self, debugger):
+    QtGui.QPlainTextEdit.__init__(self)
 
     self.pathname = None
 
@@ -276,6 +460,8 @@ class SourceCodeDisplayWidget(QtGui.QPlainTextEdit):
 
     self.__breakpointsWidget = None
     self.updateDisplay("", 0)
+
+    debugger.frameChanged.connect(self.frameChanged)
 
   def resizeEvent(self, event):
     QtGui.QWidget.resizeEvent(self, event)
@@ -407,7 +593,8 @@ class SourceCodeDisplayWidget(QtGui.QPlainTextEdit):
     if self.__breakpointsWidget is not None:
       self.__breakpointsWidget.markBreakpoints()
 
-  def updateDisplayForLineEntry(self, lineEntry):
+  def frameChanged(self, frame):
+    lineEntry = frame.GetLineEntry()
     fileSpec = lineEntry.GetFileSpec()
     if fileSpec.GetFilename():
       pathname = str(fileSpec)
@@ -416,7 +603,7 @@ class SourceCodeDisplayWidget(QtGui.QPlainTextEdit):
     lineNumber = lineEntry.GetLine()
     self.updateDisplay(pathname, lineNumber)
 
-sourceCodeDisplayWidget = SourceCodeDisplayWidget()
+sourceCodeDisplayWidget = SourceCodeDisplayWidget(debugger)
 sourceCodeDisplayWidget.setFocusPolicy(QtCore.Qt.NoFocus)
 sourceCodeDisplayWidget.setMinimumSize(640, 480)
 
@@ -642,6 +829,7 @@ class LocalsWidget(TreeWidget):
 
 localsWidget = LocalsWidget()
 localsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+debugger.frameChanged.connect(localsWidget.setFrame)
 
 class RegistersWidget(TreeWidget):
 
@@ -692,6 +880,7 @@ class RegistersWidget(TreeWidget):
 
 registersWidget = RegistersWidget()
 registersWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+debugger.frameChanged.connect(registersWidget.setFrame)
 
 class StackWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, frame):
@@ -718,19 +907,8 @@ class StackWidgetItem(QtGui.QTreeWidgetItem):
 
 class StackWidget(TreeWidget):
 
-  frameChanged = QtCore.Signal(lldb.SBFrame)
-
-  def __init__(
-    self,
-    sourceCodeDisplayWidget,
-    localsWidget,
-    registersWidget
-    ):
+  def __init__(self):
     TreeWidget.__init__(self, "stack")
-
-    self.__sourceCodeDisplayWidget = sourceCodeDisplayWidget
-    self.__localsWidget = localsWidget
-    self.__registersWidget = registersWidget
 
     self.setEnabled(False)
     self.setFocusPolicy(QtCore.Qt.NoFocus)
@@ -746,68 +924,51 @@ class StackWidget(TreeWidget):
     currentItem = self.currentItem()
     if currentItem:
       frameIndex = self.indexOfTopLevelItem(currentItem)
-      target = debugger.GetSelectedTarget()
-      if target and target.IsValid():
-        process = target.GetProcess()
-        if process and process.IsValid():
-          thread = process.GetSelectedThread()
-          thread.SetSelectedFrame(frameIndex)
-
-          frame = thread.GetFrameAtIndex(frameIndex)
-          self.frameChanged.emit(frame)
-          self.__sourceCodeDisplayWidget.updateDisplayForLineEntry(
-            frame.GetLineEntry()
-            )
-    self.__localsWidget.setFrame(frame)
-    self.__registersWidget.setFrame(frame)
+      thread = debugger.thread()
+      if thread:
+        debugger.setFrame(frameIndex)
 
   def updateDisplay(self):
     self.setCurrentItem(None)
     enabled = False
 
-    target = debugger.GetSelectedTarget()
-    if target and target.IsValid():
-      process = target.GetProcess()
-      if process and process.IsValid() and process.GetState() == lldb.eStateStopped:
-        thread = process.GetSelectedThread()
-        if thread and thread.IsValid():
-          count = thread.GetNumFrames()
-          if count > 0:
-            self.__process = process
+    thread = debugger.thread()
+    if thread and thread.IsValid():
+      process = thread.GetProcess()
+      if process.GetState() == lldb.eStateStopped:
+        count = thread.GetNumFrames()
+        if count > 0:
+          selectedFrame = thread.GetSelectedFrame()
+          selectedFrameID = selectedFrame.GetFrameID()
 
-            selectedFrame = thread.GetSelectedFrame()
-            selectedFrameID = selectedFrame.GetFrameID()
+          try:
+            self.currentItemChanged.disconnect()
+          except:
+            pass
+          self.clear()
 
-            try:
-              self.currentItemChanged.disconnect()
-            except:
-              pass
-            self.clear()
+          for i in range(0, count):
+            frame = thread.GetFrameAtIndex(i)
+            stackWidgetItem = StackWidgetItem(frame)
+            self.addTopLevelItem(stackWidgetItem)
+            if frame.GetFrameID() == selectedFrameID:
+              self.setCurrentItem(stackWidgetItem)
 
-            for i in range(0, count):
-              frame = thread.GetFrameAtIndex(i)
-              stackWidgetItem = StackWidgetItem(frame)
-              self.addTopLevelItem(stackWidgetItem)
-              if frame.GetFrameID() == selectedFrameID:
-                self.setCurrentItem(stackWidgetItem)
+          self.resizeColumnToContents(0)
+          self.resizeColumnToContents(1)
 
-            self.resizeColumnToContents(0)
-            self.resizeColumnToContents(1)
+          self.currentItemChanged.connect(self.syncToSelectedItem)
 
-            self.syncToSelectedItem()
-            def currentItemChanged(newItem, oldItem):
-              self.syncToSelectedItem()
-            self.currentItemChanged.connect(currentItemChanged)
+          enabled = True
 
-            enabled = True
     self.setEnabled(enabled)
 
-stackWidget = StackWidget(
-  sourceCodeDisplayWidget,
-  localsWidget,
-  registersWidget
-  )
+stackWidget = StackWidget()
 stackWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+debugger.frameChanged.connect(stackWidget.updateDisplay)
+debugger.processRunning.connect(lambda: stackWidget.setEnabled(False))
+debugger.processStopped.connect(lambda: stackWidget.setEnabled(True))
+debugger.processExited.connect(lambda: stackWidget.setEnabled(False))
 
 class ThreadsWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, thread):
@@ -851,7 +1012,7 @@ class ThreadsWidget(TreeWidget):
       currentItem = self.currentItem()
       if currentItem:
         threadIndex = self.indexOfTopLevelItem(currentItem)
-        target = debugger.GetSelectedTarget()
+        target = debugger.target()
         if target and target.IsValid():
           process = target.GetProcess()
           if process and process.IsValid and process.GetState() == lldb.eStateStopped:
@@ -865,7 +1026,7 @@ class ThreadsWidget(TreeWidget):
     self.__process = None
     enabled = False
 
-    target = debugger.GetSelectedTarget()
+    target = debugger.target()
     if target and target.IsValid():
       process = target.GetProcess()
       if process and process.IsValid() and process.GetState() == lldb.eStateStopped:
@@ -891,6 +1052,9 @@ class ThreadsWidget(TreeWidget):
 
 threadsWidget = ThreadsWidget(stackWidget)
 threadsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+debugger.processRunning.connect(threadsWidget.updateDisplay)
+debugger.processStopped.connect(threadsWidget.updateDisplay)
+debugger.processExited.connect(threadsWidget.updateDisplay)
 
 class AppendingTextWidget(QtGui.QTextEdit):
   def __init__(self):
@@ -1028,7 +1192,7 @@ class SourcesWidget(NoFocusWidget):
       klType = self.__klTypeWidget.isChecked()
 
       count = 0
-      target = debugger.GetSelectedTarget()
+      target = debugger.target()
       if target and target.IsValid():
         count = target.GetNumModules()
 
@@ -1109,6 +1273,7 @@ class SourcesWidget(NoFocusWidget):
     self.__resultsWidget.updateDisplay()
 
 sourcesWidget = SourcesWidget()
+debugger.processStopped.connect(sourcesWidget.updateDisplay)
 
 class LLDBDisplay(AppendingTextWidget):
   def __init__(self):
@@ -1167,7 +1332,7 @@ class BreakpointsWidget(TreeWidget):
     # [andrew 20140123] FIXME incorrectly assume unique pathnames
     newvalue = BreakpointsWidget.BP(pathname, lineNum)
     if newvalue not in self.__breakpoints.values():
-      bp = debugger.GetSelectedTarget().BreakpointCreateByLocation(str(pathname), int(lineNum))
+      bp = debugger.target().BreakpointCreateByLocation(str(pathname), int(lineNum))
       self.__breakpoints[bp.id] = newvalue
     else:
       for bpid, bpvalue in self.__breakpoints.iteritems():
@@ -1179,11 +1344,13 @@ class BreakpointsWidget(TreeWidget):
 
   def updateDisplay(self):
     self.clear()
-    for bp in debugger.GetSelectedTarget().breakpoint_iter():
-      item = QtGui.QTreeWidgetItem()
-      item.setText(0, str(bp.id))
-      item.setText(1, str(bp))
-      self.addTopLevelItem(item)
+    target = debugger.target()
+    if target and target.IsValid():
+      for bp in target.breakpoint_iter():
+        item = QtGui.QTreeWidgetItem()
+        item.setText(0, str(bp.id))
+        item.setText(1, str(bp))
+        self.addTopLevelItem(item)
     self.markBreakpoints()
 
   def markBreakpoints(self):
@@ -1269,10 +1436,9 @@ class LLDBCommandWidget(QtGui.QLineEdit):
     self.__historyPos = len(self.__history)
     breakpointsWidget.updateDisplay()
     watchpointsWidget.updateDisplay()
-    stackWidget.updateDisplay()
 
 lldbCommandWidget = LLDBCommandWidget(
-  debugger.GetCommandInterpreter(),
+  debugger.commandInterpreter(),
   lldbDisplay
   )
 
@@ -1353,22 +1519,31 @@ class DisassemblyWidget(QtGui.QWidget):
     layout.setSpacing(0)
     
     toolBar = QtGui.QToolBar()
-    self.__continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
-    def continueCallback():
-      lldbCommandWidget.executeCommand("process continue")
-    self.__continueAction.triggered.connect(continueCallback)
-    self.__stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
-    def stepInCallback():
-      lldbCommandWidget.executeCommand("thread step-inst")
-    self.__stepInAction.triggered.connect(stepInCallback)
-    self.__stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
-    def stepOverCallback():
-      lldbCommandWidget.executeCommand("thread step-inst-over")
-    self.__stepOverAction.triggered.connect(stepOverCallback)
-    self.__stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
-    def stepOutCallback():
-      lldbCommandWidget.executeCommand("thread step-out")
-    self.__stepOutAction.triggered.connect(stepOutCallback)
+
+    continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
+    continueAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process continue"))
+    debugger.processRunning.connect(lambda: continueAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
+    debugger.processExited.connect(lambda: continueAction.setEnabled(False))
+
+    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
+    stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst"))
+    debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
+
+    stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
+    stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst-over"))
+    debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepOverAction.setEnabled(False))
+
+    stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
+    stepOutAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-out"))
+    debugger.processRunning.connect(lambda: stepOutAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepOutAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepOutAction.setEnabled(False))
+
     layout.addWidget(toolBar)
 
     layout.addWidget(self.__code)
@@ -1389,7 +1564,7 @@ class DisassemblyWidget(QtGui.QWidget):
 
 disassemblyWidget = DisassemblyWidget(lldbCommandWidget)
 disassemblyWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-stackWidget.frameChanged.connect(disassemblyWidget.setFrame)
+debugger.frameChanged.connect(disassemblyWidget.setFrame)
 
 class WatchpointsWidget(QtGui.QWidget):
 
@@ -1442,10 +1617,11 @@ class WatchpointsWidget(QtGui.QWidget):
 
     def updateDisplay(self):
       self.clear()
-      target = debugger.GetSelectedTarget()
-      for i in range(0, target.GetNumWatchpoints()):
-        watchpoint = target.GetWatchpointAtIndex(i)
-        self.addTopLevelItem(WatchpointsWidget.Item(watchpoint))
+      target = debugger.target()
+      if target and target.IsValid():
+        for i in range(0, target.GetNumWatchpoints()):
+          watchpoint = target.GetWatchpointAtIndex(i)
+          self.addTopLevelItem(WatchpointsWidget.Item(watchpoint))
       self.resizeColumnToContents(0)
       self.resizeColumnToContents(1)
       self.resizeColumnToContents(2)
@@ -1494,70 +1670,50 @@ lldbCommandLayout.addWidget(QtGui.QLabel("lldb:"))
 lldbCommandLayout.addWidget(lldbCommandWidget)
 
 toolBar = QtGui.QToolBar()
-actions = []
 
 startAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "start.png")), "Start")
-def startCallback():
-  lldbCommandWidget.executeCommand("process launch")
-startAction.triggered.connect(startCallback)
-actions.append(startAction)
+startAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process launch"))
+debugger.processRunning.connect(lambda: startAction.setEnabled(False))
+debugger.processStopped.connect(lambda: startAction.setEnabled(False))
+debugger.processExited.connect(lambda: startAction.setEnabled(True))
 
 restartAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "restart.png")), "Restart")
-def restartCallback():
-  lldbCommandWidget.executeCommand("process launch")
-restartAction.triggered.connect(restartCallback)
-actions.append(restartAction)
+restartAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process launch"))
+debugger.processRunning.connect(lambda: restartAction.setEnabled(False))
+debugger.processStopped.connect(lambda: restartAction.setEnabled(True))
+debugger.processExited.connect(lambda: restartAction.setEnabled(False))
 
 interruptAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "pause.png")), "Interrupt")
-def interruptCallback():
-  lldbCommandWidget.executeCommand("process interrupt")
-interruptAction.triggered.connect(interruptCallback)
-actions.append(interruptAction)
+interruptAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process interrupt"))
+debugger.processRunning.connect(lambda: interruptAction.setEnabled(True))
+debugger.processStopped.connect(lambda: interruptAction.setEnabled(False))
+debugger.processExited.connect(lambda: interruptAction.setEnabled(False))
 
 toolBar.addSeparator()
 
 continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
-def continueCallback():
-  lldbCommandWidget.executeCommand("process continue")
-continueAction.triggered.connect(continueCallback)
-actions.append(continueAction)
+continueAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process continue"))
+debugger.processRunning.connect(lambda: continueAction.setEnabled(False))
+debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
+debugger.processExited.connect(lambda: continueAction.setEnabled(False))
 
 stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
-def stepInCallback():
-  lldbCommandWidget.executeCommand("thread step-in")
-stepInAction.triggered.connect(stepInCallback)
-actions.append(stepInAction)
+stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-in"))
+debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
+debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
+debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
 
 stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
-def stepOverCallback():
-  lldbCommandWidget.executeCommand("thread step-over")
-stepOverAction.triggered.connect(stepOverCallback)
-actions.append(stepOverAction)
+stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-over"))
+debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
+debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
+debugger.processExited.connect(lambda: stepOverAction.setEnabled(False))
 
 stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
-def stepOutCallback():
-  lldbCommandWidget.executeCommand("thread step-out")
-stepOutAction.triggered.connect(stepOutCallback)
-actions.append(stepOutAction)
-
-def updateToolbarItems():
-  for action in actions:
-    action.setEnabled(False)
-
-  target = debugger.GetSelectedTarget()
-  if target and target.IsValid():
-    process = target.GetProcess()
-    if process and process.IsValid() and process.GetState() != lldb.eStateExited:
-      if process.GetState() == lldb.eStateStopped:
-        restartAction.setEnabled(True)
-        continueAction.setEnabled(True)
-        stepInAction.setEnabled(True)
-        stepOverAction.setEnabled(True)
-        stepOutAction.setEnabled(True)
-      else:
-        interruptAction.setEnabled(True)
-    else:
-      startAction.setEnabled(True)
+stepOutAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-out"))
+debugger.processRunning.connect(lambda: stepOutAction.setEnabled(False))
+debugger.processStopped.connect(lambda: stepOutAction.setEnabled(True))
+debugger.processExited.connect(lambda: stepOutAction.setEnabled(False))
 
 lldbLayout = QtGui.QVBoxLayout()
 lldbLayout.setContentsMargins(0, 0, 0, 0)
@@ -1702,119 +1858,7 @@ exitAction.triggered.connect(exitCallback)
 
 mainWindow.menuBar().addMenu(menu)
 
-def handleDebuggerEvents():
-  event = lldb.SBEvent()
-  eventCount = 0
-  while debugger.GetListener().GetNextEvent(event):
-    eventCount += 1
-
-    # stream = lldb.SBStream()
-    # event.GetDescription(stream)
-    # print stream.GetData()
-
-    if event.GetBroadcaster().GetName() == "lldb.process":
-      target = debugger.GetSelectedTarget()
-      process = target.GetProcess()
-
-      process_stdout = process.GetSTDOUT(1024)
-      if process_stdout:
-        outputWidget.appendStdout(process_stdout)
-        while process_stdout:
-          process_stdout = process.GetSTDOUT(1024)
-          outputWidget.appendStdout(process_stdout)
-      process_stderr = process.GetSTDERR(1024)
-      if process_stderr:
-        outputWidget.appendStderr(process_stderr)
-        while process_stderr:
-          process_stderr = process.GetSTDERR(1024)
-          outputWidget.appendStderr(process_stderr)
-
-      state = lldb.SBProcess.GetStateFromEvent(event)
-      if state == lldb.eStateInvalid:
-        # Not a state event
-        print 'process event = %s' % (event)
-      else:
-        if state == lldb.eStateStopped:
-          didSelectThread = False
-          for thread in process:
-            frame = thread.GetFrameAtIndex(0)
-            shouldSelectThread = False
-            shouldDisplay = False
-
-            stopReason = thread.GetStopReason()
-            # if self.verbose:
-            #   desc = "tid = %#x pc = %#x " % (thread.GetThreadID(),frame.GetPC()),
-            if stopReason == lldb.eStopReasonNone:
-              pass
-            elif stopReason == lldb.eStopReasonTrace:
-              shouldSelectThread = True
-              shouldDisplay = True
-            elif stopReason == lldb.eStopReasonPlanComplete:
-              shouldSelectThread = True
-            # elif stopReason == lldb.eStopReasonThreadExiting:
-            #   lldbDisplay.appendDebuggerOutput("Stop: thread exiting\n")
-            elif stopReason == lldb.eStopReasonExec:
-              shouldDisplay = True
-            elif stopReason == lldb.eStopReasonInvalid:
-              pass
-            elif stopReason == lldb.eStopReasonException:
-              shouldSelectThread = True
-              shouldDisplay = True
-            elif stopReason == lldb.eStopReasonBreakpoint:
-              shouldSelectThread = True
-              shouldDisplay = True
-            elif stopReason == lldb.eStopReasonWatchpoint:
-              shouldSelectThread = True
-              shouldDisplay = True
-            elif stopReason == lldb.eStopReasonSignal:
-              shouldSelectThread = True
-              shouldDisplay = True
-
-            if shouldDisplay:
-              lldbDisplay.appendDebuggerOutput("STOP %s\n" % thread.GetStopDescription(256))
-
-            if shouldSelectThread and not didSelectThread:
-              didSelectThread = process.SetSelectedThread(thread)
-        elif state == lldb.eStateExited:
-          exit_desc = process.GetExitDescription()
-          if exit_desc:
-            lldbDisplay.appendDebuggerOutput("Process %u exited with status %u: %s\n" % (process.GetProcessID(), process.GetExitStatus(), exit_desc))
-          else:
-            lldbDisplay.appendDebuggerOutput("Process %u exited with status %u\n" % (process.GetProcessID(), process.GetExitStatus()))
-        elif state == lldb.eStateCrashed:
-          lldbDisplay.appendDebuggerOutput("Process %u crashed" % process.GetProcessID())
-        elif state == lldb.eStateDetached:
-          lldbDisplay.appendDebuggerOutput("Process %u detached" % process.GetProcessID())
-        elif state == lldb.eStateRunning:
-          # process is running, don't say anything, we will always get one of these after resuming
-          pass
-        elif state == lldb.eStateUnloaded:
-          lldbDisplay.appendDebuggerOutput("Process %u unloaded, this shouldn't happen!!!" % process.GetProcessID())
-        elif state == lldb.eStateConnected:
-          pass
-        elif state == lldb.eStateAttaching:
-          pass
-        elif state == lldb.eStateLaunching:
-          pass
-    else:
-      print 'Non-process event = %s' % (event)
-  if eventCount > 0:
-    threadsWidget.updateDisplay()
-    sourcesWidget.updateDisplay()
-    updateToolbarItems()
-
-timer = QtCore.QTimer()
-timer.timeout.connect(handleDebuggerEvents)
-timer.start(100)
-
 lldbDisplay.appendDebuggerOutput("Welcome to zBug version %s!\n" % app.applicationVersion())
-
-# [andrew 20140124] for LLDB's own logging messages, enabling different types of these
-# is done via the console using "log enable <type> <subtype/all>"
-def logToStdout(msg):
-  sys.stdout.write(msg)
-  sys.stdout.flush()
-debugger.SetLoggingCallback(logToStdout)
 
 fabricSocket = None
 if config['connectFabric']:
@@ -1890,6 +1934,10 @@ if config['connectFabric']:
   fabricSocket.timer.timeout.connect(fabricSocket.update)
   fabricSocket.timer.start(100)
 
+timer = QtCore.QTimer()
+timer.timeout.connect(debugger.handleEvents)
+timer.start(100)
+
 lldbCommandWidget.executeCommand(
   "settings set -- auto-confirm true"
   )
@@ -1900,7 +1948,6 @@ if options.pid is not None:
     )
   threadsWidget.updateDisplay()
   sourcesWidget.updateDisplay()
-  updateToolbarItems()
 else:
   if len(arguments) < 1:
     parser.print_help()
@@ -1938,8 +1985,6 @@ else:
     "process launch --stop-at-entry"
     )
 lldbCommandWidget.setFocus()
-
-updateToolbarItems()
 
 code = app.exec_()
 fabricSocket = None
