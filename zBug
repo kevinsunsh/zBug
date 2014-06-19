@@ -1411,11 +1411,12 @@ class WatchpointsWidget(QtGui.QWidget):
     self.__list = WatchpointsWidget.List()
 
     addVarLayout = QtGui.QHBoxLayout()
-    addVarLayout.addWidget(QtGui.QLabel("Add variable:"))
+    addVarLayout.addWidget(QtGui.QLabel("Add watchpoint:"))
     addVarLineEdit = QtGui.QLineEdit()
+    addVarLineEdit.setPlaceholderText("expression")
     def addVar():
       lldbCommandWidget.executeCommand(
-        "watchpoint set variable -- %s" % str(addVarLineEdit.text())
+        "watchpoint set expression -- %s" % str(addVarLineEdit.text())
         )
       addVarLineEdit.clear()
     addVarLineEdit.returnPressed.connect(addVar)
