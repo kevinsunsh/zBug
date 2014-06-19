@@ -1243,9 +1243,9 @@ class BreakpointsWidget(TreeWidget):
           debugger.GetSelectedTarget().BreakpointDelete(bpid)
           del self.__breakpoints[bpid]
           break
-    self.updateBreakpoints()
+    self.updateDisplay()
 
-  def updateBreakpoints(self):
+  def updateDisplay(self):
     self.clear()
     for bp in debugger.GetSelectedTarget().breakpoint_iter():
       item = QtGui.QTreeWidgetItem()
@@ -1328,20 +1328,116 @@ class LLDBCommandWidget(QtGui.QLineEdit):
   def executeCommand(self, command):
     lldbDisplay.appendCommand(command)
     return_obj = lldb.SBCommandReturnObject()
-    self.__commandInterpreter.HandleCommand(command, return_obj)
+    self.__commandInterpreter.HandleCommand(command, return_obj, True)
     if return_obj.Succeeded():
       self.__lldbDisplay.appendDebuggerOutput(return_obj.GetOutput())
     else:
       self.__lldbDisplay.appendDebuggerErrorOutput(return_obj.GetError())
     self.__history.append(command)
     self.__historyPos = len(self.__history)
-    breakpointsWidget.updateBreakpoints()
+    breakpointsWidget.updateDisplay()
+    watchpointsWidget.updateDisplay()
     stackWidget.updateDisplay()
 
 lldbCommandWidget = LLDBCommandWidget(
   debugger.GetCommandInterpreter(),
   lldbDisplay
   )
+
+class WatchpointsWidget(QtGui.QWidget):
+
+  class Item(QtGui.QTreeWidgetItem):
+    def __init__(self, watchpoint):
+      QtGui.QTreeWidgetItem.__init__(self)
+
+      self.__watchpoint = watchpoint
+
+      self.setFlags(
+        QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEditable
+        )
+      self.setFonts(preferences.fixedFont())
+      preferences.fixedFontChanged.connect(self.setFonts)
+
+      self.setText(0, "%d" % watchpoint.GetID())
+      self.setTextAlignment(1, QtCore.Qt.AlignRight)
+      self.setText(1, "%#x" % watchpoint.GetWatchAddress())
+      self.setText(2, "%d" % watchpoint.GetWatchSize())
+      self.setText(3, "%d" % watchpoint.GetHitCount())
+      self.setText(4, "%d" % watchpoint.GetIgnoreCount())
+      condition = watchpoint.GetCondition()
+      if condition:
+        self.setText(5, condition)
+
+    def setFonts(self, fixedFont):
+      self.setFont(0, fixedFont)
+      self.setFont(1, fixedFont)
+      self.setFont(2, fixedFont)
+      self.setFont(3, fixedFont)
+      self.setFont(4, fixedFont)
+
+    def hasChanged(self):
+      self.__watchpoint.SetCondition(self.text(5))
+
+  class List(TreeWidget):
+
+    def __init__(self):
+      TreeWidget.__init__(self, "watchpoints")
+
+      self.setIndentation(12)
+      self.setHeaderLabels([
+        "ID",
+        "Address",
+        "Size",
+        "Hits",
+        "Igns",
+        "Condition",
+        ])
+
+    def updateDisplay(self):
+      self.clear()
+      target = debugger.GetSelectedTarget()
+      for i in range(0, target.GetNumWatchpoints()):
+        watchpoint = target.GetWatchpointAtIndex(i)
+        self.addTopLevelItem(WatchpointsWidget.Item(watchpoint))
+      self.resizeColumnToContents(0)
+      self.resizeColumnToContents(1)
+      self.resizeColumnToContents(2)
+      self.resizeColumnToContents(3)
+      self.resizeColumnToContents(4)
+
+  def __init__(self, lldbCommandWidget):
+    QtGui.QWidget.__init__(self)
+
+    self.__list = WatchpointsWidget.List()
+
+    addVarLayout = QtGui.QHBoxLayout()
+    addVarLayout.addWidget(QtGui.QLabel("Add variable:"))
+    addVarLineEdit = QtGui.QLineEdit()
+    def addVar():
+      lldbCommandWidget.executeCommand(
+        "watchpoint set variable -- %s" % str(addVarLineEdit.text())
+        )
+      addVarLineEdit.clear()
+    addVarLineEdit.returnPressed.connect(addVar)
+    addVarLayout.addWidget(addVarLineEdit)
+
+    layout = QtGui.QVBoxLayout()
+    layout.addLayout(addVarLayout)
+    layout.addWidget(self.__list)
+
+    self.setLayout(layout)
+
+  def saveState(self, settings):
+    self.__list.saveState(settings)
+
+  def restoreState(self, settings):
+    self.__list.restoreState(settings)
+
+  def updateDisplay(self):
+    self.__list.updateDisplay()
+
+watchpointsWidget = WatchpointsWidget(lldbCommandWidget)
+watchpointsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
 
 lldbCommandLayout = QtGui.QHBoxLayout()
 lldbCommandLayout.setContentsMargins(4, 3, 4, 3)
@@ -1512,6 +1608,14 @@ class MainWindow(QtGui.QMainWindow):
     breakpointsWidget_dockWidget.setWindowTitle("Breakpoints")
     breakpointsWidget_dockWidget.setWidget(breakpointsWidget)
     self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, breakpointsWidget_dockWidget)
+
+    watchpointsWidget.restoreState(settings)
+    watchpointsWidget_dockWidget = QtGui.QDockWidget()
+    watchpointsWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
+    watchpointsWidget_dockWidget.setObjectName("Watchpoints")
+    watchpointsWidget_dockWidget.setWindowTitle("Watchpoints")
+    watchpointsWidget_dockWidget.setWidget(watchpointsWidget)
+    self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, watchpointsWidget_dockWidget)
 
     self.restoreState(settings.value("mainWindow/state"))
 
