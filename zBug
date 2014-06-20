@@ -627,17 +627,17 @@ class SourceWidget(QtGui.QWidget):
     debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
     debugger.processExited.connect(lambda: continueAction.setEnabled(False))
 
-    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step Into")
-    stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-in"))
-    debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
-    debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
-    debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
-
     stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
     stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-over"))
     debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
     debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
     debugger.processExited.connect(lambda: stepOverAction.setEnabled(False))
+
+    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step Into")
+    stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-in"))
+    debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
 
     stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
     stepOutAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-out"))
@@ -1612,17 +1612,17 @@ class DisassemblyWidget(QtGui.QWidget):
     debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
     debugger.processExited.connect(lambda: continueAction.setEnabled(False))
 
-    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-inst.png")), "Step Into Instruction")
-    stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst"))
-    debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
-    debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
-    debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
-
     stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-inst-over.png")), "Step Over Instruction")
     stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst-over"))
     debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
     debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
     debugger.processExited.connect(lambda: stepOverAction.setEnabled(False))
+
+    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-inst.png")), "Step Into Instruction")
+    stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst"))
+    debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
 
     stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
     stepOutAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-out"))
