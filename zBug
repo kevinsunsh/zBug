@@ -619,6 +619,7 @@ class SourceWidget(QtGui.QWidget):
     QtGui.QWidget.__init__(self)
 
     toolBar = QtGui.QToolBar()
+    toolBar.setIconSize(QtCore.QSize(20, 20))
 
     continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
     continueAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process continue"))
@@ -626,7 +627,7 @@ class SourceWidget(QtGui.QWidget):
     debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
     debugger.processExited.connect(lambda: continueAction.setEnabled(False))
 
-    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
+    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step Into")
     stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-in"))
     debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
     debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
@@ -1603,6 +1604,7 @@ class DisassemblyWidget(QtGui.QWidget):
     layout.setSpacing(0)
     
     toolBar = QtGui.QToolBar()
+    toolBar.setIconSize(QtCore.QSize(20, 20))
 
     continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
     continueAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process continue"))
@@ -1610,13 +1612,13 @@ class DisassemblyWidget(QtGui.QWidget):
     debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
     debugger.processExited.connect(lambda: continueAction.setEnabled(False))
 
-    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
+    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-inst.png")), "Step Into Instruction")
     stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst"))
     debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
     debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
     debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
 
-    stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
+    stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-inst-over.png")), "Step Over Instruction")
     stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-inst-over"))
     debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
     debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
@@ -1754,18 +1756,13 @@ lldbCommandLayout.addWidget(QtGui.QLabel("lldb:"))
 lldbCommandLayout.addWidget(lldbCommandWidget)
 
 toolBar = QtGui.QToolBar()
-
-startAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "start.png")), "Start")
-startAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process launch"))
-debugger.processRunning.connect(lambda: startAction.setEnabled(False))
-debugger.processStopped.connect(lambda: startAction.setEnabled(False))
-debugger.processExited.connect(lambda: startAction.setEnabled(True))
+toolBar.setIconSize(QtCore.QSize(20, 20))
 
 restartAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "restart.png")), "Restart")
 restartAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process launch"))
 debugger.processRunning.connect(lambda: restartAction.setEnabled(False))
 debugger.processStopped.connect(lambda: restartAction.setEnabled(True))
-debugger.processExited.connect(lambda: restartAction.setEnabled(False))
+debugger.processExited.connect(lambda: restartAction.setEnabled(True))
 
 interruptAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "pause.png")), "Interrupt")
 interruptAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process interrupt"))
