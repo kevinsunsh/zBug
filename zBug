@@ -322,18 +322,18 @@ preferences = Preferences(settings)
 fabricSourceCode = {}
 
 class LineNumberArea(QtGui.QWidget):
-  def __init__(self, sourceCodeDisplayWidget):
-    QtGui.QWidget.__init__(self, sourceCodeDisplayWidget)
-    self.__sourceCodeDisplayWidget = sourceCodeDisplayWidget
+  def __init__(self, sourceWidget):
+    QtGui.QWidget.__init__(self, sourceWidget)
+    self.__sourceWidget = sourceWidget
 
   def sizeHint(self):
-    return QtCore.QSize(self.__sourceCodeDisplayWidget.lineNumberAreaWidth(), 0)
+    return QtCore.QSize(self.__sourceWidget.lineNumberAreaWidth(), 0)
 
   def paintEvent(self, event):
-    self.__sourceCodeDisplayWidget.lineNumberAreaPaintEvent(event)
+    self.__sourceWidget.lineNumberAreaPaintEvent(event)
 
   def mousePressEvent(self, event):
-    self.__sourceCodeDisplayWidget.lineNumberAreaClickEvent(event)
+    self.__sourceWidget.lineNumberAreaClickEvent(event)
 
 class CodeDisplayWidget(QtGui.QPlainTextEdit):
   def __init__(self):
@@ -427,187 +427,245 @@ class CodeDisplayWidget(QtGui.QPlainTextEdit):
       self.appendPlainText(contentItem[1])
     self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
 
-class SourceCodeDisplayWidget(QtGui.QPlainTextEdit):
-  def __init__(self, debugger):
-    QtGui.QPlainTextEdit.__init__(self)
+class SourceWidget(QtGui.QWidget):
 
-    self.pathname = None
+  class CodeWidget(QtGui.QPlainTextEdit):
 
-    self.setReadOnly(True)
-    self.setFont(preferences.fixedFont())
-    preferences.fixedFontChanged.connect(self.setFont)
-    self.setCenterOnScroll(True)
+    def __init__(self, debugger):
+      QtGui.QPlainTextEdit.__init__(self)
 
-    lineNumberArea = LineNumberArea(self)
-    self.__lineNumberArea = lineNumberArea
+      self.setFocusPolicy(QtCore.Qt.NoFocus)
+      self.setMinimumSize(640, 480)
 
-    self.__highlightLine = 0
-    self.__breakpointLines = []
+      self.__pathname = None
 
-    def updateLineNumberAreaWidth(newBlockCount):
-      self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
-    self.blockCountChanged.connect(updateLineNumberAreaWidth)
+      self.setReadOnly(True)
+      self.setFont(preferences.fixedFont())
+      preferences.fixedFontChanged.connect(self.setFont)
+      self.setCenterOnScroll(True)
 
-    def updateLineNumberArea(rect, dy):
-      if dy != 0:
-        lineNumberArea.scroll(0, dy)
-      else:
-        lineNumberArea.update(0, rect.y(), lineNumberArea.width(), rect.height())
+      lineNumberArea = LineNumberArea(self)
+      self.__lineNumberArea = lineNumberArea
 
-      if rect.contains(self.viewport().rect()):
-        updateLineNumberAreaWidth(0)
-    self.updateRequest.connect(updateLineNumberArea)
+      self.__highlightLine = 0
+      self.__breakpointLines = []
 
-    updateLineNumberAreaWidth(0)
+      def updateLineNumberAreaWidth(newBlockCount):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+      self.blockCountChanged.connect(updateLineNumberAreaWidth)
 
-    self.__breakpointsWidget = None
-    self.updateDisplay("", 0)
+      def updateLineNumberArea(rect, dy):
+        if dy != 0:
+          lineNumberArea.scroll(0, dy)
+        else:
+          lineNumberArea.update(0, rect.y(), lineNumberArea.width(), rect.height())
 
-    debugger.frameChanged.connect(self.frameChanged)
+        if rect.contains(self.viewport().rect()):
+          updateLineNumberAreaWidth(0)
+      self.updateRequest.connect(updateLineNumberArea)
 
-  def resizeEvent(self, event):
-    QtGui.QWidget.resizeEvent(self, event)
-    cr = self.contentsRect()
-    self.__lineNumberArea.setGeometry(
-      QtCore.QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height())
-      )
+      updateLineNumberAreaWidth(0)
 
-  def lineNumberAreaWidth(self):
-    digits = 1
-    max = self.blockCount()
-    if max < 1:
-      max = 1
-    while max >= 10:
-      max = max / 10
-      digits = digits + 1
-    return 3 + self.fontMetrics().width('9') * digits + 3
+      self.__breakpointsWidget = None
+      self.updateDisplay("", 0)
 
-  def setBreakpointsWidget(self, widget):
-    self.__breakpointsWidget = widget
+      debugger.frameChanged.connect(self.frameChanged)
 
-  def lineNumberAreaClickEvent(self, event):
-    firstBlock = self.firstVisibleBlock()
-    blockHeight = self.blockBoundingRect(firstBlock).height()
-    blockNum = int(event.y() / blockHeight) + firstBlock.blockNumber()
-    lineNum = blockNum+1
-    if self.__breakpointsWidget is not None:
-      self.__breakpointsWidget.toggleBreakpoint(self.pathname, lineNum)
+    def pathname(self):
+      return self.__pathname
 
-  def lineNumberAreaPaintEvent(self, event):
-    lineNumberArea = self.__lineNumberArea
-    painter = QtGui.QPainter(lineNumberArea)
-    painter.fillRect(event.rect(), QtCore.Qt.lightGray)
-    block = self.firstVisibleBlock()
-    blockNumber = block.blockNumber()
-    top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
-    bottom = top + int(self.blockBoundingRect(block).height())
-    while block.isValid() and top <= event.rect().bottom():
-      if block.isVisible() and bottom >= event.rect().top():
-        blockNumberText = str(blockNumber + 1)
-        painter.setPen(QtCore.Qt.black)
-        painter.drawText(
-          0, top,
-          lineNumberArea.width() - 3, self.fontMetrics().height(),
-          QtCore.Qt.AlignRight, blockNumberText
-          )
-      block = block.next()
-      top = bottom
+    def resizeEvent(self, event):
+      QtGui.QWidget.resizeEvent(self, event)
+      cr = self.contentsRect()
+      self.__lineNumberArea.setGeometry(
+        QtCore.QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height())
+        )
+
+    def lineNumberAreaWidth(self):
+      digits = 1
+      max = self.blockCount()
+      if max < 1:
+        max = 1
+      while max >= 10:
+        max = max / 10
+        digits = digits + 1
+      return 3 + self.fontMetrics().width('9') * digits + 3
+
+    def setBreakpointsWidget(self, widget):
+      self.__breakpointsWidget = widget
+
+    def lineNumberAreaClickEvent(self, event):
+      firstBlock = self.firstVisibleBlock()
+      blockHeight = self.blockBoundingRect(firstBlock).height()
+      blockNum = int(event.y() / blockHeight) + firstBlock.blockNumber()
+      lineNum = blockNum+1
+      if self.__breakpointsWidget is not None:
+        self.__breakpointsWidget.toggleBreakpoint(self.__pathname, lineNum)
+
+    def lineNumberAreaPaintEvent(self, event):
+      lineNumberArea = self.__lineNumberArea
+      painter = QtGui.QPainter(lineNumberArea)
+      painter.fillRect(event.rect(), QtCore.Qt.lightGray)
+      block = self.firstVisibleBlock()
+      blockNumber = block.blockNumber()
+      top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
       bottom = top + int(self.blockBoundingRect(block).height())
-      blockNumber = blockNumber + 1
+      while block.isValid() and top <= event.rect().bottom():
+        if block.isVisible() and bottom >= event.rect().top():
+          blockNumberText = str(blockNumber + 1)
+          painter.setPen(QtCore.Qt.black)
+          painter.drawText(
+            0, top,
+            lineNumberArea.width() - 3, self.fontMetrics().height(),
+            QtCore.Qt.AlignRight, blockNumberText
+            )
+        block = block.next()
+        top = bottom
+        bottom = top + int(self.blockBoundingRect(block).height())
+        blockNumber = blockNumber + 1
+
+    def markBreakpointLines(self, lines):
+      self.__breakpointLines = lines
+      self.addHighlights()
+
+    def highlightLine(self, lineNumber):
+      self.__highlightLine = lineNumber
+      self.addHighlights()
+
+    def addHighlights(self):
+      selections = []
+      document = self.document()
+
+      for lineNumber in self.__breakpointLines:
+        block = document.findBlockByLineNumber(lineNumber)
+        textCursor = self.textCursor()
+        textCursor.setPosition(block.position())
+        self.setTextCursor(textCursor)
+
+        selection = QtGui.QTextEdit.ExtraSelection()
+        lineColor = QtGui.QColor(QtCore.Qt.red).lighter(160)
+        selection.format.setBackground(lineColor)
+        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        selection.cursor = textCursor
+        selection.cursor.clearSelection()
+        selections.append(selection)
+
+      if self.__highlightLine > 0:
+        block = document.findBlockByLineNumber(self.__highlightLine)
+        textCursor = self.textCursor()
+        textCursor.setPosition(block.position())
+        self.setTextCursor(textCursor)
+
+        selection = QtGui.QTextEdit.ExtraSelection()
+        lineColor = QtGui.QColor(QtCore.Qt.yellow).lighter(160)
+        selection.format.setBackground(lineColor)
+        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        selection.cursor = textCursor
+        selection.cursor.clearSelection()
+        selections.append(selection)
+
+      self.setExtraSelections(selections)
+
+    def updateDisplay(self, pathname, lineNumber):
+      newPathname = self.__pathname != self.pathname
+      self.__pathname = pathname
+
+      if len(pathname) > 0:
+        if newPathname:
+          contents = None
+          if config['connectFabric']:
+            if pathname.find("(internal)") != -1:
+              contents = "Internal KL function, no source code available."
+            elif fabricSourceCode.has_key(pathname):
+              contents = fabricSourceCode[pathname]
+            elif fabricSourceCode.has_key(os.path.basename(pathname)):
+              contents = fabricSourceCode[os.path.basename(pathname)]
+
+          if contents is None:
+            try:
+              f = open(pathname, 'r')
+              contents = f.read()
+              f.close()
+            except IOError as e:
+              contents = "Unable to read file:\n  %s\n" % str(e)
+              lineNumber = 0
+          self.setPlainText(contents)
+          if self.parent() is not None:
+            self.parent().setTitle(os.path.basename(pathname))
+      else:
+        self.setPlainText("No source code for this location")
+        lineNumber = 0
+
+      if lineNumber >= 1:
+        self.highlightLine(lineNumber - 1)
+      else:
+        self.highlightLine(0)
+
+      if self.__breakpointsWidget is not None:
+        self.__breakpointsWidget.markBreakpoints()
+
+    def frameChanged(self, frame):
+      lineEntry = frame.GetLineEntry()
+      fileSpec = lineEntry.GetFileSpec()
+      if fileSpec.GetFilename():
+        pathname = str(fileSpec)
+      else:
+        pathname = ""
+      lineNumber = lineEntry.GetLine()
+      self.updateDisplay(pathname, lineNumber)
+
+  def __init__(self, debugger, lldbCommandWidget):
+    QtGui.QWidget.__init__(self)
+
+    toolBar = QtGui.QToolBar()
+
+    continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
+    continueAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process continue"))
+    debugger.processRunning.connect(lambda: continueAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
+    debugger.processExited.connect(lambda: continueAction.setEnabled(False))
+
+    stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
+    stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-in"))
+    debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
+
+    stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
+    stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-over"))
+    debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepOverAction.setEnabled(False))
+
+    stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
+    stepOutAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-out"))
+    debugger.processRunning.connect(lambda: stepOutAction.setEnabled(False))
+    debugger.processStopped.connect(lambda: stepOutAction.setEnabled(True))
+    debugger.processExited.connect(lambda: stepOutAction.setEnabled(False))
+
+    self.__codeWidget = SourceWidget.CodeWidget(debugger)
+
+    layout = QtGui.QVBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    layout.addWidget(toolBar)
+    layout.addWidget(self.__codeWidget)
+    self.setLayout(layout)
+
+  def pathname(self):
+    return self.__codeWidget.pathname()
 
   def markBreakpointLines(self, lines):
-    self.__breakpointLines = lines
-    self.addHighlights()
+    self.__codeWidget.markBreakpointLines(lines)
 
-  def highlightLine(self, lineNumber):
-    self.__highlightLine = lineNumber
-    self.addHighlights()
-
-  def addHighlights(self):
-    selections = []
-    document = self.document()
-
-    for lineNumber in self.__breakpointLines:
-      block = document.findBlockByLineNumber(lineNumber)
-      textCursor = self.textCursor()
-      textCursor.setPosition(block.position())
-      self.setTextCursor(textCursor)
-
-      selection = QtGui.QTextEdit.ExtraSelection()
-      lineColor = QtGui.QColor(QtCore.Qt.red).lighter(160)
-      selection.format.setBackground(lineColor)
-      selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-      selection.cursor = textCursor
-      selection.cursor.clearSelection()
-      selections.append(selection)
-
-    if self.__highlightLine > 0:
-      block = document.findBlockByLineNumber(self.__highlightLine)
-      textCursor = self.textCursor()
-      textCursor.setPosition(block.position())
-      self.setTextCursor(textCursor)
-
-      selection = QtGui.QTextEdit.ExtraSelection()
-      lineColor = QtGui.QColor(QtCore.Qt.yellow).lighter(160)
-      selection.format.setBackground(lineColor)
-      selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-      selection.cursor = textCursor
-      selection.cursor.clearSelection()
-      selections.append(selection)
-
-    self.setExtraSelections(selections)
+  def setBreakpointsWidget(self, breakpointsWidget):
+    self.__codeWidget.setBreakpointsWidget(breakpointsWidget)
 
   def updateDisplay(self, pathname, lineNumber):
-    newPathname = pathname != self.pathname
-    self.pathname = pathname
+    self.__codeWidget.updateDisplay(pathname, lineNumber)
 
-    if len(pathname) > 0:
-      if newPathname:
-        contents = None
-        if config['connectFabric']:
-          if pathname.find("(internal)") != -1:
-            contents = "Internal KL function, no source code available."
-          elif fabricSourceCode.has_key(pathname):
-            contents = fabricSourceCode[pathname]
-          elif fabricSourceCode.has_key(os.path.basename(pathname)):
-            contents = fabricSourceCode[os.path.basename(pathname)]
-
-        if contents is None:
-          try:
-            f = open(pathname, 'r')
-            contents = f.read()
-            f.close()
-          except IOError as e:
-            contents = "Unable to read file:\n  %s\n" % str(e)
-            lineNumber = 0
-        self.setPlainText(contents)
-        if self.parent() is not None:
-          self.parent().setTitle(os.path.basename(pathname))
-    else:
-      self.setPlainText("No source code for this location")
-      lineNumber = 0
-
-    if lineNumber >= 1:
-      self.highlightLine(lineNumber - 1)
-    else:
-      self.highlightLine(0)
-
-    if self.__breakpointsWidget is not None:
-      self.__breakpointsWidget.markBreakpoints()
-
-  def frameChanged(self, frame):
-    lineEntry = frame.GetLineEntry()
-    fileSpec = lineEntry.GetFileSpec()
-    if fileSpec.GetFilename():
-      pathname = str(fileSpec)
-    else:
-      pathname = ""
-    lineNumber = lineEntry.GetLine()
-    self.updateDisplay(pathname, lineNumber)
-
-sourceCodeDisplayWidget = SourceCodeDisplayWidget(debugger)
-sourceCodeDisplayWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-sourceCodeDisplayWidget.setMinimumSize(640, 480)
+  def setTitle(self, title):
+    self.parent().setTitle(title)
 
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, includeExtras):
@@ -1189,7 +1247,7 @@ class SourcesWidget(NoFocusWidget):
             pathname = os.path.join(directory, filename)
           else:
             pathname = filename
-          sourceCodeDisplayWidget.updateDisplay(pathname, 0)
+          sourceWidget.updateDisplay(pathname, 0)
       self.currentItemChanged.connect(currentItemChanged)
 
     def updateDisplay(self):
@@ -1316,7 +1374,7 @@ class BreakpointsWidget(TreeWidget):
     TreeWidget.__init__(self, "breakpoints")
 
     self.__breakpoints = {}
-    self.__sourceCodeDisplayWidget = sourceCodeDisplay
+    self.__sourceWidget = sourceCodeDisplay
 
     self.setIndentation(12)
     self.setHeaderLabels([
@@ -1330,7 +1388,7 @@ class BreakpointsWidget(TreeWidget):
       if not self.__breakpoints.has_key(bpid):
         return
       bp = self.__breakpoints[bpid]
-      self.__sourceCodeDisplayWidget.updateDisplay(bp.pathname, bp.line)
+      self.__sourceWidget.updateDisplay(bp.pathname, bp.line)
       self.markBreakpoints()
     self.itemClicked.connect(itemWasClicked)
 
@@ -1362,15 +1420,11 @@ class BreakpointsWidget(TreeWidget):
   def markBreakpoints(self):
     lines = []
     # [andrew 20140123] FIXME incorrectly assume unique filenames
-    currentPathname = self.__sourceCodeDisplayWidget.pathname
+    currentPathname = self.__sourceWidget.pathname()
     for bpid, bp in self.__breakpoints.iteritems():
       if bp.pathname == currentPathname:
         lines.append(bp.line-1)
-    self.__sourceCodeDisplayWidget.markBreakpointLines(lines)
-
-breakpointsWidget = BreakpointsWidget(sourceCodeDisplayWidget)
-breakpointsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-sourceCodeDisplayWidget.setBreakpointsWidget(breakpointsWidget)
+    self.__sourceWidget.markBreakpointLines(lines)
 
 lldbDisplay = LLDBDisplay()
 lldbDisplay.setFocusPolicy(QtCore.Qt.NoFocus)
@@ -1447,6 +1501,12 @@ lldbCommandWidget = LLDBCommandWidget(
   debugger.commandInterpreter(),
   lldbDisplay
   )
+
+sourceWidget = SourceWidget(debugger, lldbCommandWidget)
+
+breakpointsWidget = BreakpointsWidget(sourceWidget)
+breakpointsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+sourceWidget.setBreakpointsWidget(breakpointsWidget)
 
 class DisassemblyWidget(QtGui.QWidget):
 
@@ -1695,32 +1755,6 @@ debugger.processRunning.connect(lambda: interruptAction.setEnabled(True))
 debugger.processStopped.connect(lambda: interruptAction.setEnabled(False))
 debugger.processExited.connect(lambda: interruptAction.setEnabled(False))
 
-toolBar.addSeparator()
-
-continueAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "continue.png")), "Continue")
-continueAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process continue"))
-debugger.processRunning.connect(lambda: continueAction.setEnabled(False))
-debugger.processStopped.connect(lambda: continueAction.setEnabled(True))
-debugger.processExited.connect(lambda: continueAction.setEnabled(False))
-
-stepInAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-in.png")), "Step In")
-stepInAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-in"))
-debugger.processRunning.connect(lambda: stepInAction.setEnabled(False))
-debugger.processStopped.connect(lambda: stepInAction.setEnabled(True))
-debugger.processExited.connect(lambda: stepInAction.setEnabled(False))
-
-stepOverAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-over.png")), "Step Over")
-stepOverAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-over"))
-debugger.processRunning.connect(lambda: stepOverAction.setEnabled(False))
-debugger.processStopped.connect(lambda: stepOverAction.setEnabled(True))
-debugger.processExited.connect(lambda: stepOverAction.setEnabled(False))
-
-stepOutAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "step-out.png")), "Step Out")
-stepOutAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("thread step-out"))
-debugger.processRunning.connect(lambda: stepOutAction.setEnabled(False))
-debugger.processStopped.connect(lambda: stepOutAction.setEnabled(True))
-debugger.processExited.connect(lambda: stepOutAction.setEnabled(False))
-
 lldbLayout = QtGui.QVBoxLayout()
 lldbLayout.setContentsMargins(0, 0, 0, 0)
 lldbLayout.setSpacing(0)
@@ -1745,7 +1779,7 @@ class MainWindow(QtGui.QMainWindow):
     self.restoreGeometry(settings.value("mainWindow/geometry"))
 
     self.setTabPosition(QtCore.Qt.AllDockWidgetAreas, QtGui.QTabWidget.South)
-    self.setCentralWidget(sourceCodeDisplayWidget)
+    self.setCentralWidget(sourceWidget)
 
     localsWidget.restoreState(settings)
     localsWidget_dockWidget = QtGui.QDockWidget()
