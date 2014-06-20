@@ -61,6 +61,8 @@ class Debugger(QtCore.QObject):
   processRunning = QtCore.Signal(lldb.SBProcess)
   processStopped = QtCore.Signal(lldb.SBProcess)
   processExited = QtCore.Signal(lldb.SBProcess)
+  processAppendedToStdout = QtCore.Signal(basestring)
+  processAppendedToStderr = QtCore.Signal(basestring)
   threadChanged = QtCore.Signal(lldb.SBThread)
   frameChanged = QtCore.Signal(lldb.SBFrame)
 
@@ -130,16 +132,16 @@ class Debugger(QtCore.QObject):
 
         process_stdout = process.GetSTDOUT(1024)
         if process_stdout:
-          outputWidget.appendStdout(process_stdout)
+          self.processAppendedToStdout.emit(process_stdout)
           while process_stdout:
             process_stdout = process.GetSTDOUT(1024)
-            outputWidget.appendStdout(process_stdout)
+            self.processAppendedToStdout.emit(process_stdout)
         process_stderr = process.GetSTDERR(1024)
         if process_stderr:
-          outputWidget.appendStderr(process_stderr)
+          self.processAppendedToStderr.emit(process_stderr)
           while process_stderr:
             process_stderr = process.GetSTDERR(1024)
-            outputWidget.appendStderr(process_stderr)
+            self.processAppendedToStderr.emit(process_stderr)
 
         threadChanged = False
         frameChanged = False
@@ -1074,11 +1076,17 @@ class AppendingTextWidget(QtGui.QTextEdit):
     self.ensureCursorVisible()
 
 class OutputWidget(AppendingTextWidget):
-  def __init__(self):
+  def __init__(self, debugger):
     AppendingTextWidget.__init__(self)
+
+    self.setFocusPolicy(QtCore.Qt.NoFocus)
+    self.setMinimumWidth(640)
 
     self.__stdoutColor = QtGui.QColor(QtCore.Qt.black)
     self.__stderrColor = QtGui.QColor(QtCore.Qt.red).lighter(50)
+
+    debugger.processAppendedToStdout.connect(self.appendStdout)
+    debugger.processAppendedToStderr.connect(self.appendStderr)
 
   def saveState(self, settings):
     pass
@@ -1092,9 +1100,7 @@ class OutputWidget(AppendingTextWidget):
   def appendStderr(self, text):
     self.append(text, self.__stderrColor)
 
-outputWidget = OutputWidget()
-outputWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-outputWidget.setMinimumWidth(640)
+outputWidget = OutputWidget(debugger)
 
 class NoFocusWidget(QtGui.QWidget):
   def __init__(self):
