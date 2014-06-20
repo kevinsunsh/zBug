@@ -435,7 +435,7 @@ class SourceWidget(QtGui.QWidget):
       QtGui.QPlainTextEdit.__init__(self)
 
       self.setFocusPolicy(QtCore.Qt.NoFocus)
-      self.setMinimumSize(640, 480)
+      self.setMinimumSize(40, 30)
 
       self.__pathname = None
 
@@ -590,8 +590,6 @@ class SourceWidget(QtGui.QWidget):
               contents = "Unable to read file:\n  %s\n" % str(e)
               lineNumber = 0
           self.setPlainText(contents)
-          if self.parent() is not None:
-            self.parent().setTitle(os.path.basename(pathname))
       else:
         self.setPlainText("No source code for this location")
         lineNumber = 0
@@ -645,11 +643,21 @@ class SourceWidget(QtGui.QWidget):
 
     self.__codeWidget = SourceWidget.CodeWidget(debugger)
 
+    self.__statusBarLabel = QtGui.QLabel()
+
+    statusBarLayout = QtGui.QHBoxLayout()
+    statusBarLayout.addWidget(self.__statusBarLabel)
+
+    statusBar = QtGui.QStatusBar()
+    statusBar.setSizeGripEnabled(False)
+    statusBar.setLayout(statusBarLayout)
+
     layout = QtGui.QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
     layout.addWidget(toolBar)
     layout.addWidget(self.__codeWidget)
+    layout.addWidget(statusBar)
     self.setLayout(layout)
 
   def pathname(self):
@@ -663,9 +671,16 @@ class SourceWidget(QtGui.QWidget):
 
   def updateDisplay(self, pathname, lineNumber):
     self.__codeWidget.updateDisplay(pathname, lineNumber)
+    self.__statusBarLabel.setText(pathname)
 
   def setTitle(self, title):
     self.parent().setTitle(title)
+
+  def saveState(self, settings):
+    pass
+
+  def restoreState(self, settings):
+    pass
 
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, includeExtras):
@@ -1779,7 +1794,7 @@ class MainWindow(QtGui.QMainWindow):
     self.restoreGeometry(settings.value("mainWindow/geometry"))
 
     self.setTabPosition(QtCore.Qt.AllDockWidgetAreas, QtGui.QTabWidget.South)
-    self.setCentralWidget(sourceWidget)
+    self.setDockNestingEnabled(True)
 
     localsWidget.restoreState(settings)
     localsWidget_dockWidget = QtGui.QDockWidget()
@@ -1820,6 +1835,14 @@ class MainWindow(QtGui.QMainWindow):
     sourcesWidget_dockWidget.setWindowTitle("Sources")
     sourcesWidget_dockWidget.setWidget(sourcesWidget)
     self.addDockWidget(QtCore.Qt.RightDockWidgetArea, sourcesWidget_dockWidget)
+
+    sourceWidget.restoreState(settings)
+    sourceWidget_dockWidget = QtGui.QDockWidget()
+    sourceWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
+    sourceWidget_dockWidget.setObjectName("Source")
+    sourceWidget_dockWidget.setWindowTitle("Source")
+    sourceWidget_dockWidget.setWidget(sourceWidget)
+    self.addDockWidget(QtCore.Qt.TopDockWidgetArea, sourceWidget_dockWidget)
 
     disassemblyWidget.restoreState(settings)
     disassemblyWidget_dockWidget = QtGui.QDockWidget()
@@ -1862,12 +1885,6 @@ class MainWindow(QtGui.QMainWindow):
     self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, watchpointsWidget_dockWidget)
 
     self.restoreState(settings.value("mainWindow/state"))
-
-    self.setTitle(name)
-
-  def setTitle(self, name):
-    title = "%s: %s" % (app.applicationName(), name)
-    self.setWindowTitle(title)
 
   def closeEvent(self, event):
     self.__settings.setValue("mainWindow/state", self.saveState())
