@@ -317,6 +317,9 @@ class Preferences(QtCore.QObject):
     self.__dialog.raise_()
     self.__dialog.activateWindow()
 
+  def settings(self):
+    return self.__settings
+
 preferences = Preferences(settings)
 
 fabricSourceCode = {}
@@ -1781,17 +1784,25 @@ lldbWidget = QtGui.QWidget()
 lldbWidget.setLayout(lldbLayout)
 
 class MainWindow(QtGui.QMainWindow):
-  def __init__(self, settings, name):
+  def __init__(self, preferences):
     QtGui.QMainWindow.__init__(self)
 
-    self.__settings = settings
+    self.__settings = preferences.settings()
+
+    menuBar = self.menuBar()
+
+    fileMenu = QtGui.QMenu("&File")
+    preferencesAction = fileMenu.addAction("Preferences")
+    preferencesAction.triggered.connect(lambda: preferences.showDialog(self))
+    fileMenu.addSeparator()
+    exitAction = fileMenu.addAction("E&xit")
+    exitAction.triggered.connect(self.close)
+    menuBar.addMenu(fileMenu)
 
     def handler(signum, frame):
       signal.signal(signum, signal.SIG_DFL)
       self.close()
     signal.signal(signal.SIGINT, handler)
-    
-    self.restoreGeometry(settings.value("mainWindow/geometry"))
 
     self.setTabPosition(QtCore.Qt.AllDockWidgetAreas, QtGui.QTabWidget.South)
     self.setDockNestingEnabled(True)
@@ -1802,6 +1813,7 @@ class MainWindow(QtGui.QMainWindow):
     localsWidget_dockWidget.setObjectName("Locals")
     localsWidget_dockWidget.setWindowTitle("Locals")
     localsWidget_dockWidget.setWidget(localsWidget)
+    localsWidget_dockWidget.setHidden(False)
     self.addDockWidget(QtCore.Qt.TopDockWidgetArea, localsWidget_dockWidget)
 
     registersWidget.restoreState(settings)
@@ -1810,6 +1822,7 @@ class MainWindow(QtGui.QMainWindow):
     registersWidget_dockWidget.setObjectName("Registers")
     registersWidget_dockWidget.setWindowTitle("Registers")
     registersWidget_dockWidget.setWidget(registersWidget)
+    registersWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.TopDockWidgetArea, registersWidget_dockWidget)
 
     stackWidget.restoreState(settings)
@@ -1818,6 +1831,7 @@ class MainWindow(QtGui.QMainWindow):
     stackWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
     stackWidget_dockWidget.setWindowTitle("Stack")
     stackWidget_dockWidget.setWidget(stackWidget)
+    stackWidget_dockWidget.setHidden(False)
     self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, stackWidget_dockWidget)
 
     threadsWidget.restoreState(settings)
@@ -1826,6 +1840,7 @@ class MainWindow(QtGui.QMainWindow):
     threadsWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
     threadsWidget_dockWidget.setWindowTitle("Threads")
     threadsWidget_dockWidget.setWidget(threadsWidget)
+    threadsWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, threadsWidget_dockWidget)
 
     sourcesWidget.restoreState(settings)
@@ -1834,15 +1849,18 @@ class MainWindow(QtGui.QMainWindow):
     sourcesWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
     sourcesWidget_dockWidget.setWindowTitle("Sources")
     sourcesWidget_dockWidget.setWidget(sourcesWidget)
+    sourcesWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.RightDockWidgetArea, sourcesWidget_dockWidget)
 
     sourceWidget.restoreState(settings)
-    sourceWidget_dockWidget = QtGui.QDockWidget()
-    sourceWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
-    sourceWidget_dockWidget.setObjectName("Source")
-    sourceWidget_dockWidget.setWindowTitle("Source")
-    sourceWidget_dockWidget.setWidget(sourceWidget)
-    self.addDockWidget(QtCore.Qt.TopDockWidgetArea, sourceWidget_dockWidget)
+    self.setCentralWidget(sourceWidget)
+    # sourceWidget_dockWidget = QtGui.QDockWidget()
+    # sourceWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
+    # sourceWidget_dockWidget.setObjectName("Source")
+    # sourceWidget_dockWidget.setWindowTitle("Source")
+    # sourceWidget_dockWidget.setWidget(sourceWidget)
+    # sourceWidget_dockWidget.setHidden(False)
+    # self.addDockWidget(QtCore.Qt.RightDockWidgetArea, sourceWidget_dockWidget)
 
     disassemblyWidget.restoreState(settings)
     disassemblyWidget_dockWidget = QtGui.QDockWidget()
@@ -1850,6 +1868,7 @@ class MainWindow(QtGui.QMainWindow):
     disassemblyWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
     disassemblyWidget_dockWidget.setWindowTitle("Disassembly")
     disassemblyWidget_dockWidget.setWidget(disassemblyWidget)
+    disassemblyWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.RightDockWidgetArea, disassemblyWidget_dockWidget)
 
     # lldbWidget.restoreState(settings)
@@ -1858,6 +1877,7 @@ class MainWindow(QtGui.QMainWindow):
     lldbWidget_dockWidget.setWindowTitle("LLDB")
     lldbWidget_dockWidget.setObjectName("LLDB")
     lldbWidget_dockWidget.setWidget(lldbWidget)
+    lldbWidget_dockWidget.setHidden(False)
     self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, lldbWidget_dockWidget)
 
     outputWidget.restoreState(settings)
@@ -1866,6 +1886,7 @@ class MainWindow(QtGui.QMainWindow):
     outputWidget_dockWidget.setObjectName("Output")
     outputWidget_dockWidget.setWindowTitle("Output")
     outputWidget_dockWidget.setWidget(outputWidget)
+    lldbWidget_dockWidget.setHidden(False)
     self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, outputWidget_dockWidget)
 
     breakpointsWidget.restoreState(settings)
@@ -1874,6 +1895,7 @@ class MainWindow(QtGui.QMainWindow):
     breakpointsWidget_dockWidget.setObjectName("Breakpoints")
     breakpointsWidget_dockWidget.setWindowTitle("Breakpoints")
     breakpointsWidget_dockWidget.setWidget(breakpointsWidget)
+    breakpointsWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, breakpointsWidget_dockWidget)
 
     watchpointsWidget.restoreState(settings)
@@ -1882,9 +1904,54 @@ class MainWindow(QtGui.QMainWindow):
     watchpointsWidget_dockWidget.setObjectName("Watchpoints")
     watchpointsWidget_dockWidget.setWindowTitle("Watchpoints")
     watchpointsWidget_dockWidget.setWidget(watchpointsWidget)
+    watchpointsWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, watchpointsWidget_dockWidget)
-
+    
+    self.restoreGeometry(settings.value("mainWindow/geometry"))
     self.restoreState(settings.value("mainWindow/state"))
+
+    windowMenu = QtGui.QMenu("&Windows")
+    # toggleSourceAction = windowMenu.addAction("Source")
+    # toggleSourceAction.setCheckable(True)
+    # toggleSourceAction.setChecked(not sourceWidget_dockWidget.isHidden())
+    # toggleSourceAction.toggled.connect(lambda checked: sourceWidget_dockWidget.setHidden(not checked))
+    toggleDisassemblyAction = windowMenu.addAction("Disassembly")
+    toggleDisassemblyAction.setCheckable(True)
+    toggleDisassemblyAction.setChecked(not disassemblyWidget_dockWidget.isHidden())
+    toggleDisassemblyAction.toggled.connect(lambda checked: disassemblyWidget_dockWidget.setHidden(not checked))
+    windowMenu.addSeparator()
+    toggleStackAction = windowMenu.addAction("Stack")
+    toggleStackAction.setCheckable(True)
+    toggleStackAction.setChecked(not stackWidget_dockWidget.isHidden())
+    toggleStackAction.toggled.connect(lambda checked: stackWidget_dockWidget.setHidden(not checked))
+    toggleThreadsAction = windowMenu.addAction("Threads")
+    toggleThreadsAction.setCheckable(True)
+    toggleThreadsAction.setChecked(not threadsWidget_dockWidget.isHidden())
+    toggleThreadsAction.toggled.connect(lambda checked: threadsWidget_dockWidget.setHidden(not checked))
+    windowMenu.addSeparator()
+    toggleLocalsAction = windowMenu.addAction("Locals")
+    toggleLocalsAction.setCheckable(True)
+    toggleLocalsAction.setChecked(not localsWidget_dockWidget.isHidden())
+    toggleLocalsAction.toggled.connect(lambda checked: localsWidget_dockWidget.setHidden(not checked))
+    toggleRegistersAction = windowMenu.addAction("Registers")
+    toggleRegistersAction.setCheckable(True)
+    toggleRegistersAction.setChecked(not registersWidget_dockWidget.isHidden())
+    toggleRegistersAction.toggled.connect(lambda checked: registersWidget_dockWidget.setHidden(not checked))
+    windowMenu.addSeparator()
+    toggleBreakpointsAction = windowMenu.addAction("Breakpoints")
+    toggleBreakpointsAction.setCheckable(True)
+    toggleBreakpointsAction.setChecked(not breakpointsWidget_dockWidget.isHidden())
+    toggleBreakpointsAction.toggled.connect(lambda checked: breakpointsWidget_dockWidget.setHidden(not checked))
+    toggleWatchpointsAction = windowMenu.addAction("Watchpoints")
+    toggleWatchpointsAction.setCheckable(True)
+    toggleWatchpointsAction.setChecked(not watchpointsWidget_dockWidget.isHidden())
+    toggleWatchpointsAction.toggled.connect(lambda checked: watchpointsWidget_dockWidget.setHidden(not checked))
+    windowMenu.addSeparator()
+    toggleSourcesAction = windowMenu.addAction("Sources")
+    toggleSourcesAction.setCheckable(True)
+    toggleSourcesAction.setChecked(not sourcesWidget_dockWidget.isHidden())
+    toggleSourcesAction.toggled.connect(lambda checked: sourcesWidget_dockWidget.setHidden(not checked))
+    menuBar.addMenu(windowMenu)
 
   def closeEvent(self, event):
     self.__settings.setValue("mainWindow/state", self.saveState())
@@ -1899,21 +1966,8 @@ class MainWindow(QtGui.QMainWindow):
     localsWidget.saveState(settings)
     self.__settings.setValue("mainWindow/geometry", self.saveGeometry())
 
-mainWindow = MainWindow(settings, 'Debugger')
+mainWindow = MainWindow(preferences)
 mainWindow.show()
-
-menu = QtGui.QMenu("&File")
-preferencesAction = menu.addAction("Preferences")
-def preferencesCallback():
-  preferences.showDialog(mainWindow)
-preferencesAction.triggered.connect(preferencesCallback)
-menu.addSeparator()
-exitAction = menu.addAction("E&xit")
-def exitCallback():
-  mainWindow.close()
-exitAction.triggered.connect(exitCallback)
-
-mainWindow.menuBar().addMenu(menu)
 
 lldbDisplay.appendDebuggerOutput("Welcome to zBug version %s!\n" % app.applicationVersion())
 
