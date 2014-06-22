@@ -3,6 +3,7 @@
 import sys, os, platform, commands, stat, signal, optparse
 import json, select, socket
 from PySide import QtCore, QtGui
+from difflib import SequenceMatcher
 
 zBugPath = os.path.dirname(os.path.realpath(sys.argv[0]))
 
@@ -647,21 +648,23 @@ class SourceWidget(QtGui.QWidget):
 
     self.__codeWidget = SourceWidget.CodeWidget(debugger)
 
-    self.__statusBarLabel = QtGui.QLabel()
+    self.__fileSelLineEdit = QtGui.QLineEdit()
+    self.__fileSelLineEdit.textChanged.connect(self.popupFileSelList)
+    self.__fileSelLineEdit.returnPressed.connect(self.popupFileSelList)
+    self.__fileSelListWidget = None
 
-    statusBarLayout = QtGui.QHBoxLayout()
-    statusBarLayout.addWidget(self.__statusBarLabel)
-
-    statusBar = QtGui.QStatusBar()
-    statusBar.setSizeGripEnabled(False)
-    statusBar.setLayout(statusBarLayout)
+    fileSelLayout = QtGui.QHBoxLayout()
+    fileSelLayout.setContentsMargins(4, 4, 4, 4)
+    fileSelLayout.setSpacing(4)
+    fileSelLayout.addWidget(QtGui.QLabel("File:"))
+    fileSelLayout.addWidget(self.__fileSelLineEdit)
 
     layout = QtGui.QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
     layout.addWidget(toolBar)
+    layout.addLayout(fileSelLayout)
     layout.addWidget(self.__codeWidget)
-    layout.addWidget(statusBar)
     self.setLayout(layout)
 
   def pathname(self):
@@ -673,10 +676,6 @@ class SourceWidget(QtGui.QWidget):
   def setBreakpointsWidget(self, breakpointsWidget):
     self.__codeWidget.setBreakpointsWidget(breakpointsWidget)
 
-  def updateDisplay(self, pathname, lineNumber):
-    self.__codeWidget.updateDisplay(pathname, lineNumber)
-    self.__statusBarLabel.setText(pathname)
-
   def setTitle(self, title):
     self.parent().setTitle(title)
 
@@ -685,6 +684,58 @@ class SourceWidget(QtGui.QWidget):
 
   def restoreState(self, settings):
     pass
+
+  def showPathname(self, pathname):
+    self.__codeWidget.updateDisplay(pathname, 0)
+    self.__fileSelLineEdit.textChanged.disconnect(self.popupFileSelList)
+    self.__fileSelLineEdit.setText(pathname)
+    self.__fileSelLineEdit.setSelection(0, len(pathname))
+    self.__fileSelLineEdit.textChanged.connect(self.popupFileSelList)
+
+  def popupFileSelList(self):
+    if not self.__fileSelListWidget:
+      self.__fileSelListWidget = QtGui.QListWidget(self)
+      def currentTextChanged(pathname):
+        self.showPathname(pathname)
+        self.__fileSelListWidget.hide()
+      self.__fileSelListWidget.currentTextChanged.connect(currentTextChanged)
+
+    self.__fileSelListWidget.clear()
+
+    filterText = self.__fileSelLineEdit.text()
+
+    for filename in fabricSourceCode:
+      if len(filterText) == 0 or filterText in filename:
+        self.__fileSelListWidget.addItem(filename)
+
+    count = 0
+    target = debugger.target()
+    if target and target.IsValid():
+      count = target.GetNumModules()
+
+    for i in range(0, count):
+      module = target.GetModuleAtIndex(i)
+      compileUnitCount = module.GetNumCompileUnits()
+      for j in range(0, compileUnitCount):
+        compileUnit = module.GetCompileUnitAtIndex(j)
+        fileSpec = compileUnit.GetFileSpec()
+        filename = fileSpec.GetFilename()
+        if not filename:
+          continue
+        directory = fileSpec.GetDirectory()
+        pathname = os.path.join(directory, filename)
+        if len(filterText) == 0 or filterText in pathname:
+          self.__fileSelListWidget.addItem(pathname)
+
+    self.__fileSelListWidget.move(
+      self.mapFromGlobal(
+        self.__fileSelLineEdit.mapToGlobal(
+          QtCore.QPoint(0, self.__fileSelLineEdit.size().height())
+          )
+        )
+      )
+    self.__fileSelListWidget.adjustSize()
+    self.__fileSelListWidget.show()
 
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, includeExtras):
@@ -1185,179 +1236,6 @@ class NoFocusWidget(QtGui.QWidget):
 
     self.setFocusPolicy(QtCore.Qt.NoFocus)
 
-class SourcesWidget(NoFocusWidget):
-
-  class FilterWidget(QtGui.QLineEdit):
-    filterChanged = QtCore.Signal(basestring)
-
-    def __init__(self):
-      QtGui.QLineEdit.__init__(self)
-
-      self.setFont(preferences.fixedFont())
-      preferences.fixedFontChanged.connect(self.setFont)
-
-      def returnPressed():
-        text = self.text()
-        self.selectAll()
-        self.filterChanged.emit(text)
-      self.returnPressed.connect(returnPressed)
-
-    def restoreState(self, settings):
-      self.setText(settings.value("sources/filter", ""))
-
-    def saveState(self, settings):
-      settings.setValue("sources/filter", self.text())
-
-  class KLTypeWidget(QtGui.QCheckBox):
-    def __init__(self):
-      QtGui.QCheckBox.__init__(self, "KL")
-
-      self.__settings = settings
-
-    def restoreState(self, settings):
-      checked = settings.value("sources/types/kl", False)
-      if checked:
-        self.setCheckState(QtCore.Qt.Checked)
-      else:
-        self.setCheckState(QtCore.Qt.Unchecked)
-
-    def saveState(self, settings):
-      checked = self.checkState() == QtCore.Qt.Checked
-      settings.setValue("sources/types/kl", checked)
-
-  class RegTypeWidget(QtGui.QCheckBox):
-    def __init__(self):
-      QtGui.QCheckBox.__init__(self, "Regular")
-
-      self.__settings = settings
-
-    def restoreState(self, settings):
-      checked = settings.value("sources/types/reg", False)
-      if checked:
-        self.setCheckState(QtCore.Qt.Checked)
-      else:
-        self.setCheckState(QtCore.Qt.Unchecked)
-
-    def saveState(self, settings):
-      checked = self.checkState() == QtCore.Qt.Checked
-      settings.setValue("sources/types/reg", checked)
-
-  class ResultsWidget(TreeWidget):
-    def __init__(self, filterWidget, regTypeWidget, klTypeWidget):
-      TreeWidget.__init__(self, "sources")
-
-      self.__filterWidget = filterWidget;
-      self.__regTypeWidget = regTypeWidget;
-      self.__klTypeWidget = klTypeWidget;
-
-      self.setIndentation(0)
-
-      self.setHeaderLabels([
-        "Filename",
-        "Directory"
-        ])
-
-      def currentItemChanged(newItem, oldItem):
-        currentItem = self.currentItem()
-        if currentItem:
-          filename = currentItem.text(0)
-          directory = currentItem.text(1)
-          if len(directory) > 0:
-            pathname = os.path.join(directory, filename)
-          else:
-            pathname = filename
-          sourceWidget.updateDisplay(pathname, 0)
-      self.currentItemChanged.connect(currentItemChanged)
-
-    def updateDisplay(self):
-      filterText = self.__filterWidget.text().strip()
-      regType = self.__regTypeWidget.isChecked()
-      klType = self.__klTypeWidget.isChecked()
-
-      count = 0
-      target = debugger.target()
-      if target and target.IsValid():
-        count = target.GetNumModules()
-
-      self.clear()
-      if klType:
-        for filename in fabricSourceCode:
-          if len(filterText) == 0 \
-              or (filename is not None and filterText in filename):
-            tableWidgetItem = QtGui.QTreeWidgetItem()
-            tableWidgetItem.setText(0, filename)
-            tableWidgetItem.setText(1, '')
-            self.addTopLevelItem(tableWidgetItem)
-      if regType:
-        for i in range(0, count):
-          module = target.GetModuleAtIndex(i)
-          compileUnitCount = module.GetNumCompileUnits()
-          for j in range(0, compileUnitCount):
-            compileUnit = module.GetCompileUnitAtIndex(j)
-            fileSpec = compileUnit.GetFileSpec()
-            filename = fileSpec.GetFilename()
-            if not filename:
-              continue
-            directory = fileSpec.GetDirectory()
-            if len(filterText) == 0 \
-                or (filename is not None and filterText in filename) \
-                or (directory is not None and filterText in directory):
-              tableWidgetItem = QtGui.QTreeWidgetItem()
-              tableWidgetItem.setText(0, filename)
-              tableWidgetItem.setText(1, directory)
-              self.addTopLevelItem(tableWidgetItem)
-      self.sortByColumn(0, QtCore.Qt.AscendingOrder)
-
-  def __init__(self):
-    NoFocusWidget.__init__(self)
-
-    self.__regTypeWidget = self.RegTypeWidget()
-    self.__klTypeWidget = self.KLTypeWidget()
-    typeLayout = QtGui.QHBoxLayout()
-    typeLayout.addWidget(QtGui.QLabel("Source types:"))
-    typeLayout.addWidget(self.__regTypeWidget)
-    typeLayout.addWidget(self.__klTypeWidget)
-
-    self.__filterWidget = self.FilterWidget()
-
-    filterLayout = QtGui.QGridLayout()
-    filterLayout.addWidget(QtGui.QLabel("Filter:"), 0, 0)
-    filterLayout.addWidget(self.__filterWidget, 0, 1)
-    filterLayout.addLayout(typeLayout, 1, 1)
-
-    self.__resultsWidget = self.ResultsWidget(
-      self.__filterWidget,
-      self.__regTypeWidget,
-      self.__klTypeWidget
-      )
-    self.__resultsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-    self.__filterWidget.filterChanged.connect(self.__resultsWidget.updateDisplay)
-    self.__regTypeWidget.stateChanged.connect(self.__resultsWidget.updateDisplay)
-    self.__klTypeWidget.stateChanged.connect(self.__resultsWidget.updateDisplay)
-
-    layout = QtGui.QVBoxLayout()
-    layout.addLayout(filterLayout)
-    layout.addWidget(self.__resultsWidget)
-    self.setLayout(layout)
-
-    self.updateDisplay()
-
-  def restoreState(self, settings):
-    self.__regTypeWidget.restoreState(settings)
-    self.__klTypeWidget.restoreState(settings)
-    self.__filterWidget.restoreState(settings)
-
-  def saveState(self, settings):
-    self.__regTypeWidget.saveState(settings)
-    self.__klTypeWidget.saveState(settings)
-    self.__filterWidget.saveState(settings)
-
-  def updateDisplay(self):
-    self.__resultsWidget.updateDisplay()
-
-sourcesWidget = SourcesWidget()
-debugger.processStopped.connect(sourcesWidget.updateDisplay)
-
 class LLDBDisplay(AppendingTextWidget):
   def __init__(self):
     AppendingTextWidget.__init__(self)
@@ -1840,15 +1718,6 @@ class MainWindow(QtGui.QMainWindow):
     threadsWidget_dockWidget.setHidden(True)
     self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, threadsWidget_dockWidget)
 
-    sourcesWidget.restoreState(settings)
-    sourcesWidget_dockWidget = QtGui.QDockWidget()
-    sourcesWidget_dockWidget.setObjectName("Sources")
-    sourcesWidget_dockWidget.setFeatures(QtGui.QDockWidget.DockWidgetMovable|QtGui.QDockWidget.DockWidgetFloatable)
-    sourcesWidget_dockWidget.setWindowTitle("Sources")
-    sourcesWidget_dockWidget.setWidget(sourcesWidget)
-    sourcesWidget_dockWidget.setHidden(True)
-    self.addDockWidget(QtCore.Qt.RightDockWidgetArea, sourcesWidget_dockWidget)
-
     sourceWidget.restoreState(settings)
     self.setCentralWidget(sourceWidget)
     # sourceWidget_dockWidget = QtGui.QDockWidget()
@@ -1943,11 +1812,6 @@ class MainWindow(QtGui.QMainWindow):
     toggleWatchpointsAction.setCheckable(True)
     toggleWatchpointsAction.setChecked(not watchpointsWidget_dockWidget.isHidden())
     toggleWatchpointsAction.toggled.connect(lambda checked: watchpointsWidget_dockWidget.setHidden(not checked))
-    windowMenu.addSeparator()
-    toggleSourcesAction = windowMenu.addAction("Sources")
-    toggleSourcesAction.setCheckable(True)
-    toggleSourcesAction.setChecked(not sourcesWidget_dockWidget.isHidden())
-    toggleSourcesAction.toggled.connect(lambda checked: sourcesWidget_dockWidget.setHidden(not checked))
     menuBar.addMenu(windowMenu)
 
   def closeEvent(self, event):
@@ -1956,7 +1820,6 @@ class MainWindow(QtGui.QMainWindow):
     outputWidget.saveState(settings)
     # lldbWidget.saveState(settings)
     disassemblyWidget.saveState(settings)
-    sourcesWidget.saveState(settings)
     threadsWidget.saveState(settings)
     stackWidget.saveState(settings)
     registersWidget.saveState(settings)
@@ -2055,7 +1918,6 @@ if options.pid is not None:
     "process attach --pid=%s" % options.pid
     )
   threadsWidget.updateDisplay()
-  sourcesWidget.updateDisplay()
 else:
   if len(arguments) < 1:
     parser.print_help()
