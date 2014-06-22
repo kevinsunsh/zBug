@@ -616,6 +616,25 @@ class SourceWidget(QtGui.QWidget):
       lineNumber = lineEntry.GetLine()
       self.updateDisplay(pathname, lineNumber)
 
+  class FileSelLineEdit(QtGui.QLineEdit):
+
+    afterFocusIn = QtCore.Signal()
+    beforeFocusOut = QtCore.Signal()
+
+    def __init__(self, sourceWidget):
+      QtGui.QLineEdit.__init__(self)
+
+      self.textChanged.connect(sourceWidget.showFileSelList)
+      self.returnPressed.connect(sourceWidget.showFileSelList)
+
+    def focusInEvent(self, event):
+      QtGui.QLineEdit.focusInEvent(self, event)
+      self.afterFocusIn.emit()
+
+    def focusOutEvent(self, event):
+      self.beforeFocusOut.emit()
+      QtGui.QLineEdit.focusOutEvent(self, event)
+
   def __init__(self, debugger, lldbCommandWidget):
     QtGui.QWidget.__init__(self)
 
@@ -648,9 +667,9 @@ class SourceWidget(QtGui.QWidget):
 
     self.__codeWidget = SourceWidget.CodeWidget(debugger)
 
-    self.__fileSelLineEdit = QtGui.QLineEdit()
-    self.__fileSelLineEdit.textChanged.connect(self.popupFileSelList)
-    self.__fileSelLineEdit.returnPressed.connect(self.popupFileSelList)
+    self.__fileSelLineEdit = SourceWidget.FileSelLineEdit(self)
+    self.__fileSelLineEdit.afterFocusIn.connect(self.showFileSelList)
+    self.__fileSelLineEdit.beforeFocusOut.connect(self.hideFileSelList)
     self.__fileSelListWidget = None
 
     fileSelLayout = QtGui.QHBoxLayout()
@@ -687,12 +706,16 @@ class SourceWidget(QtGui.QWidget):
 
   def showPathname(self, pathname):
     self.__codeWidget.updateDisplay(pathname, 0)
-    self.__fileSelLineEdit.textChanged.disconnect(self.popupFileSelList)
+    self.__fileSelLineEdit.textChanged.disconnect(self.showFileSelList)
     self.__fileSelLineEdit.setText(pathname)
     self.__fileSelLineEdit.setSelection(0, len(pathname))
-    self.__fileSelLineEdit.textChanged.connect(self.popupFileSelList)
+    self.__fileSelLineEdit.textChanged.connect(self.showFileSelList)
 
-  def popupFileSelList(self):
+  def hideFileSelList(self):
+    if self.__fileSelListWidget:
+      self.__fileSelListWidget.hide()
+
+  def showFileSelList(self):
     if not self.__fileSelListWidget:
       self.__fileSelListWidget = QtGui.QListWidget(self)
       def currentTextChanged(pathname):
