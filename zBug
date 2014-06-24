@@ -1293,7 +1293,7 @@ class OutputWidget(AppendingTextWidget):
     self.setMinimumWidth(640)
 
     self.__stdoutColor = QtGui.QColor(QtCore.Qt.black)
-    self.__stdoutBGColor = QtGui.QColor(QtCore.Qt.green).lighter(150)
+    self.__stdoutBGColor = QtGui.QColor(QtCore.Qt.white)
     self.__stderrColor = QtGui.QColor(QtCore.Qt.black)
     self.__stderrBGColor = QtGui.QColor(QtCore.Qt.red).lighter(150)
 
