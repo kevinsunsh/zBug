@@ -645,6 +645,8 @@ class SourceWidget(QtGui.QWidget):
     def __init__(self, sourceWidget):
       QtGui.QLineEdit.__init__(self)
 
+      self.__sourceWidget = sourceWidget
+
       self.textEdited.connect(sourceWidget.updateFileSelList)
 
     def focusInEvent(self, event):
@@ -654,6 +656,29 @@ class SourceWidget(QtGui.QWidget):
     def focusOutEvent(self, event):
       QtGui.QLineEdit.focusOutEvent(self, event)
       self.afterFocusOut.emit()
+
+    def event(self, event):
+      if event.type() == QtCore.QEvent.Type.KeyPress:
+        key = event.key()
+        if key == QtCore.Qt.Key_Down:
+          self.__sourceWidget.focusFileSelList()
+          return True
+      return QtGui.QLineEdit.event(self, event)
+
+  class FileSelListWidget(QtGui.QListWidget):
+
+    returnPressed = QtCore.Signal(QtGui.QListWidgetItem)
+
+    def __init__(self, parent):
+      QtGui.QListWidget.__init__(self, parent)
+
+    def event(self, event):
+      if event.type() == QtCore.QEvent.Type.KeyPress:
+        key = event.key()
+        if key == QtCore.Qt.Key_Return:
+          self.returnPressed.emit(self.currentItem())
+          return True
+      return QtGui.QListWidget.event(self, event)
 
   def __init__(self, debugger, lldbCommandWidget):
     QtGui.QWidget.__init__(self)
@@ -705,7 +730,7 @@ class SourceWidget(QtGui.QWidget):
     layout.addWidget(self.__codeWidget)
     self.setLayout(layout)
 
-    self.__fileSelListWidget = QtGui.QListWidget(self)
+    self.__fileSelListWidget = SourceWidget.FileSelListWidget(self)
     def showItemAndClose(item):
       if item:
         pathname = item.pathname()
@@ -713,6 +738,7 @@ class SourceWidget(QtGui.QWidget):
         self.hideFileSelList()
         lldbCommandWidget.setFocus()
     self.__fileSelListWidget.itemClicked.connect(showItemAndClose)
+    self.__fileSelListWidget.returnPressed.connect(showItemAndClose)
     self.__fileSelListWidget.hide()
 
   def pathname(self):
@@ -740,6 +766,10 @@ class SourceWidget(QtGui.QWidget):
   def maybeHideFileSelList(self):
     if not self.__fileSelListWidget.hasFocus():
       self.hideFileSelList()
+
+  def focusFileSelList(self):
+    self.__fileSelListWidget.setFocus()
+    self.__fileSelListWidget.setCurrentRow(0)
 
   def hideFileSelList(self):
     self.__fileSelListWidget.hide()
@@ -1245,8 +1275,9 @@ class AppendingTextWidget(QtGui.QTextEdit):
     self.setFont(preferences.fixedFont())
     preferences.fixedFontChanged.connect(self.setFont)
 
-  def append(self, text, color):
+  def append(self, text, color, bgColor):
     self.setTextColor(color)
+    self.setTextBackgroundColor(bgColor)
     charFormat = self.currentCharFormat()
     textCursor = self.textCursor()
     textCursor.movePosition(QtGui.QTextCursor.End)
@@ -1262,7 +1293,9 @@ class OutputWidget(AppendingTextWidget):
     self.setMinimumWidth(640)
 
     self.__stdoutColor = QtGui.QColor(QtCore.Qt.black)
-    self.__stderrColor = QtGui.QColor(QtCore.Qt.red).lighter(50)
+    self.__stdoutBGColor = QtGui.QColor(QtCore.Qt.green).lighter(150)
+    self.__stderrColor = QtGui.QColor(QtCore.Qt.black)
+    self.__stderrBGColor = QtGui.QColor(QtCore.Qt.red).lighter(150)
 
     debugger.processAppendedToStdout.connect(self.appendStdout)
     debugger.processAppendedToStderr.connect(self.appendStderr)
@@ -1274,10 +1307,10 @@ class OutputWidget(AppendingTextWidget):
     pass
 
   def appendStdout(self, text):
-    self.append(text, self.__stdoutColor)
+    self.append(text, self.__stdoutColor, self.__stdoutBGColor)
 
   def appendStderr(self, text):
-    self.append(text, self.__stderrColor)
+    self.append(text, self.__stderrColor, self.__stderrBGColor)
 
 outputWidget = OutputWidget(debugger)
 
@@ -1291,6 +1324,7 @@ class LLDBDisplay(AppendingTextWidget):
   def __init__(self):
     AppendingTextWidget.__init__(self)
 
+    self.__bgColor = QtGui.QColor(QtCore.Qt.white)
     self.__commandColor = QtGui.QColor(QtCore.Qt.blue).lighter(50)
     self.__successOutputColor = QtGui.QColor(QtCore.Qt.green).lighter(50)
     self.__failureOutputColor = QtGui.QColor(QtCore.Qt.green).lighter(50)
@@ -1302,13 +1336,13 @@ class LLDBDisplay(AppendingTextWidget):
     pass
 
   def appendCommand(self, text):
-    self.append("> " + text + "\n", self.__commandColor)
+    self.append("> " + text + "\n", self.__commandColor, self.__bgColor)
 
   def appendDebuggerOutput(self, text):
-    self.append(text, self.__successOutputColor)
+    self.append(text, self.__successOutputColor, self.__bgColor)
 
   def appendDebuggerErrorOutput(self, text):
-    self.append(text, self.__failureOutputColor)
+    self.append(text, self.__failureOutputColor, self.__bgColor)
 
 class BreakpointsWidget(TreeWidget):
   class BP(object):
