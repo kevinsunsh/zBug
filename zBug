@@ -618,6 +618,25 @@ class SourceWidget(QtGui.QWidget):
       lineNumber = lineEntry.GetLine()
       self.updateDisplay(pathname, lineNumber)
 
+  class FileSelfListWidgetItem(QtGui.QListWidgetItem):
+
+    def __init__(self, pathname):
+      if len(pathname) < 40:
+        displayText = pathname
+      else:
+        pathparts = pathname.split(os.path.sep)
+        if len(pathparts) < 4:
+          displayText = pathname
+        else:
+          displayText = os.path.sep.join(pathparts[0:2] + ["..."] + [pathparts[-2], pathparts[-1]])
+
+      QtGui.QListWidgetItem.__init__(self, displayText)
+
+      self.__pathname = pathname
+
+    def pathname(self):
+      return self.__pathname
+
   class FileSelLineEdit(QtGui.QLineEdit):
 
     afterFocusIn = QtCore.Signal()
@@ -687,11 +706,12 @@ class SourceWidget(QtGui.QWidget):
     self.setLayout(layout)
 
     self.__fileSelListWidget = QtGui.QListWidget(self)
-    def currentTextChanged(pathname):
-      if len(pathname) > 0:
+    def currentItemChanged(item):
+      if item:
+        pathname = item.pathname()
         self.showPathname(pathname)
         lldbCommandWidget.setFocus()
-    self.__fileSelListWidget.currentTextChanged.connect(currentTextChanged)
+    self.__fileSelListWidget.currentItemChanged.connect(currentItemChanged)
     self.__fileSelListWidget.hide()
 
   def pathname(self):
@@ -730,7 +750,7 @@ class SourceWidget(QtGui.QWidget):
 
     for filename in fabricSourceCode:
       if len(filterText) == 0 or filterText in filename:
-        self.__fileSelListWidget.addItem(filename)
+        self.__fileSelListWidget.addItem(SourceWidget.FileSelfListWidgetItem(filename))
 
     count = 0
     target = debugger.target()
@@ -749,7 +769,7 @@ class SourceWidget(QtGui.QWidget):
         directory = fileSpec.GetDirectory()
         pathname = os.path.join(directory, filename)
         if len(filterText) == 0 or filterText in pathname:
-          self.__fileSelListWidget.addItem(pathname)
+          self.__fileSelListWidget.addItem(SourceWidget.FileSelfListWidgetItem(pathname))
 
     self.__fileSelListWidget.move(
       self.mapFromGlobal(
