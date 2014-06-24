@@ -247,7 +247,7 @@ debugger = Debugger()
 app = QtGui.QApplication([])
 app.setOrganizationName("zBug")
 app.setApplicationName("zBug")
-app.setApplicationVersion("1.1")
+app.setApplicationVersion("1.2")
 
 settings = QtCore.QSettings()
 
@@ -1683,6 +1683,8 @@ class WatchpointsWidget(QtGui.QWidget):
     self.__list = WatchpointsWidget.List()
 
     addVarLayout = QtGui.QHBoxLayout()
+    addVarLayout.setContentsMargins(4, 4, 4, 4)
+    addVarLayout.setSpacing(4)
     addVarLayout.addWidget(QtGui.QLabel("Add watchpoint:"))
     addVarLineEdit = QtGui.QLineEdit()
     addVarLineEdit.setPlaceholderText("expression")
@@ -1695,6 +1697,8 @@ class WatchpointsWidget(QtGui.QWidget):
     addVarLayout.addWidget(addVarLineEdit)
 
     layout = QtGui.QVBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
     layout.addLayout(addVarLayout)
     layout.addWidget(self.__list)
 
