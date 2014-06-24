@@ -640,7 +640,7 @@ class SourceWidget(QtGui.QWidget):
   class FileSelLineEdit(QtGui.QLineEdit):
 
     afterFocusIn = QtCore.Signal()
-    beforeFocusOut = QtCore.Signal()
+    afterFocusOut = QtCore.Signal()
 
     def __init__(self, sourceWidget):
       QtGui.QLineEdit.__init__(self)
@@ -652,8 +652,8 @@ class SourceWidget(QtGui.QWidget):
       self.afterFocusIn.emit()
 
     def focusOutEvent(self, event):
-      self.beforeFocusOut.emit()
       QtGui.QLineEdit.focusOutEvent(self, event)
+      self.afterFocusOut.emit()
 
   def __init__(self, debugger, lldbCommandWidget):
     QtGui.QWidget.__init__(self)
@@ -689,7 +689,7 @@ class SourceWidget(QtGui.QWidget):
 
     self.__fileSelLineEdit = SourceWidget.FileSelLineEdit(self)
     self.__fileSelLineEdit.afterFocusIn.connect(self.showFileSelList)
-    self.__fileSelLineEdit.beforeFocusOut.connect(self.hideFileSelList)
+    self.__fileSelLineEdit.afterFocusOut.connect(self.maybeHideFileSelList)
 
     fileSelLayout = QtGui.QHBoxLayout()
     fileSelLayout.setContentsMargins(4, 4, 4, 4)
@@ -706,12 +706,13 @@ class SourceWidget(QtGui.QWidget):
     self.setLayout(layout)
 
     self.__fileSelListWidget = QtGui.QListWidget(self)
-    def currentItemChanged(item):
+    def showItemAndClose(item):
       if item:
         pathname = item.pathname()
         self.showPathname(pathname)
+        self.hideFileSelList()
         lldbCommandWidget.setFocus()
-    self.__fileSelListWidget.currentItemChanged.connect(currentItemChanged)
+    self.__fileSelListWidget.itemClicked.connect(showItemAndClose)
     self.__fileSelListWidget.hide()
 
   def pathname(self):
@@ -735,6 +736,10 @@ class SourceWidget(QtGui.QWidget):
   def showPathname(self, pathname):
     self.__codeWidget.updateDisplay(pathname, 0)
     self.__fileSelLineEdit.setText(pathname)
+
+  def maybeHideFileSelList(self):
+    if not self.__fileSelListWidget.hasFocus():
+      self.hideFileSelList()
 
   def hideFileSelList(self):
     self.__fileSelListWidget.hide()
@@ -1344,7 +1349,7 @@ class BreakpointsWidget(TreeWidget):
     else:
       for bpid, bpvalue in self.__breakpoints.iteritems():
         if newvalue == bpvalue:
-          debugger.GetSelectedTarget().BreakpointDelete(bpid)
+          debugger.target().BreakpointDelete(bpid)
           del self.__breakpoints[bpid]
           break
     self.updateDisplay()
