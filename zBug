@@ -340,9 +340,11 @@ class LineNumberArea(QtGui.QWidget):
     self.__sourceWidget.lineNumberAreaClickEvent(event)
 
 class CodeDisplayWidget(QtGui.QPlainTextEdit):
+
   def __init__(self):
     QtGui.QPlainTextEdit.__init__(self)
 
+    self.setFocusPolicy(QtCore.Qt.NoFocus)
     self.setReadOnly(True)
     self.setFont(preferences.fixedFont())
     preferences.fixedFontChanged.connect(self.setFont)
@@ -624,8 +626,7 @@ class SourceWidget(QtGui.QWidget):
     def __init__(self, sourceWidget):
       QtGui.QLineEdit.__init__(self)
 
-      self.textChanged.connect(sourceWidget.showFileSelList)
-      self.returnPressed.connect(sourceWidget.showFileSelList)
+      self.textEdited.connect(sourceWidget.updateFileSelList)
 
     def focusInEvent(self, event):
       QtGui.QLineEdit.focusInEvent(self, event)
@@ -670,7 +671,6 @@ class SourceWidget(QtGui.QWidget):
     self.__fileSelLineEdit = SourceWidget.FileSelLineEdit(self)
     self.__fileSelLineEdit.afterFocusIn.connect(self.showFileSelList)
     self.__fileSelLineEdit.beforeFocusOut.connect(self.hideFileSelList)
-    self.__fileSelListWidget = None
 
     fileSelLayout = QtGui.QHBoxLayout()
     fileSelLayout.setContentsMargins(4, 4, 4, 4)
@@ -685,6 +685,14 @@ class SourceWidget(QtGui.QWidget):
     layout.addLayout(fileSelLayout)
     layout.addWidget(self.__codeWidget)
     self.setLayout(layout)
+
+    self.__fileSelListWidget = QtGui.QListWidget(self)
+    def currentTextChanged(pathname):
+      if len(pathname) > 0:
+        self.showPathname(pathname)
+        lldbCommandWidget.setFocus()
+    self.__fileSelListWidget.currentTextChanged.connect(currentTextChanged)
+    self.__fileSelListWidget.hide()
 
   def pathname(self):
     return self.__codeWidget.pathname()
@@ -706,23 +714,16 @@ class SourceWidget(QtGui.QWidget):
 
   def showPathname(self, pathname):
     self.__codeWidget.updateDisplay(pathname, 0)
-    self.__fileSelLineEdit.textChanged.disconnect(self.showFileSelList)
     self.__fileSelLineEdit.setText(pathname)
-    self.__fileSelLineEdit.setSelection(0, len(pathname))
-    self.__fileSelLineEdit.textChanged.connect(self.showFileSelList)
 
   def hideFileSelList(self):
-    if self.__fileSelListWidget:
-      self.__fileSelListWidget.hide()
+    self.__fileSelListWidget.hide()
 
   def showFileSelList(self):
-    if not self.__fileSelListWidget:
-      self.__fileSelListWidget = QtGui.QListWidget(self)
-      def currentTextChanged(pathname):
-        self.showPathname(pathname)
-        self.__fileSelListWidget.hide()
-      self.__fileSelListWidget.currentTextChanged.connect(currentTextChanged)
+    self.__fileSelLineEdit.clear()
+    self.updateFileSelList()
 
+  def updateFileSelList(self):
     self.__fileSelListWidget.clear()
 
     filterText = self.__fileSelLineEdit.text()
@@ -759,6 +760,8 @@ class SourceWidget(QtGui.QWidget):
       )
     self.__fileSelListWidget.adjustSize()
     self.__fileSelListWidget.show()
+
+    self.__fileSelLineEdit.setFocus()
 
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
   def __init__(self, includeExtras):
