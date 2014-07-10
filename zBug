@@ -762,6 +762,8 @@ class SourceWidget(QtGui.QWidget):
     self.__fileSelListWidget.returnPressed.connect(showItemAndClose)
     self.__fileSelListWidget.hide()
 
+    self.__lldbCommandWidget = lldbCommandWidget
+
   def pathname(self):
     return self.__codeWidget.pathname()
 
@@ -793,11 +795,15 @@ class SourceWidget(QtGui.QWidget):
     self.__fileSelListWidget.setCurrentRow(0)
 
   def hideFileSelList(self):
+    if self.__codeWidget.hasFocus():
+      self.__lldbCommandWidget.setFocus()
+      self.__codeWidget.setFocusPolicy(QtCore.Qt.NoFocus)
     self.__fileSelListWidget.hide()
 
   def showFileSelList(self):
     self.__fileSelLineEdit.clear()
     self.updateFileSelList()
+    self.__codeWidget.setFocusPolicy(QtCore.Qt.ClickFocus)
 
   def updateFileSelList(self):
     self.__fileSelListWidget.clear()
@@ -992,6 +998,7 @@ class TreeWidget(QtGui.QTreeWidget):
     settings.setValue("%s/state" % self.__settingsName, self.header().saveState())
 
 class LocalsWidget(TreeWidget):
+
   def __init__(self):
     TreeWidget.__init__(self, "locals")
 
@@ -1366,6 +1373,7 @@ class LLDBDisplay(AppendingTextWidget):
     self.append(text, self.__failureOutputColor, self.__bgColor)
 
 class BreakpointsWidget(TreeWidget):
+
   class BP(object):
     def __init__(self, pathname, line):
       self.pathname = pathname
