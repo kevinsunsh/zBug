@@ -606,31 +606,29 @@ class SourceWidget(QtGui.QWidget):
     def setPathname(self, pathname):
       newPathname = self.__pathname != self.pathname
       self.__pathname = pathname
+      if newPathname:
+        if len(pathname) > 0:
+            contents = None
+            if config['connectFabric']:
+              if pathname.find("(internal)") != -1:
+                contents = "Internal KL function, no source code available."
+              elif fabricSourceCode.has_key(pathname):
+                contents = fabricSourceCode[pathname]
+              elif fabricSourceCode.has_key(os.path.basename(pathname)):
+                contents = fabricSourceCode[os.path.basename(pathname)]
 
-      if len(pathname) > 0:
-        if newPathname:
-          contents = None
-          if config['connectFabric']:
-            if pathname.find("(internal)") != -1:
-              contents = "Internal KL function, no source code available."
-            elif fabricSourceCode.has_key(pathname):
-              contents = fabricSourceCode[pathname]
-            elif fabricSourceCode.has_key(os.path.basename(pathname)):
-              contents = fabricSourceCode[os.path.basename(pathname)]
-
-          if contents is None:
-            try:
-              f = open(pathname, 'r')
-              contents = f.read()
-              f.close()
-            except IOError as e:
-              contents = "Unable to read file:\n  %s\n" % str(e)
-              lineNumber = 0
-          self.setPlainText(contents)
-      else:
-        self.setPlainText("No source code for this location")
-        lineNumber = 0
-
+            if contents is None:
+              try:
+                f = open(pathname, 'r')
+                contents = f.read()
+                f.close()
+              except IOError as e:
+                contents = "Unable to read file:\n  %s\n" % str(e)
+                lineNumber = 0
+            self.setPlainText(contents)
+        else:
+          self.setPlainText("No source code for this location")
+          lineNumber = 0
       if newPathname:
         self.pathnameChanged.emit(self.__pathname)
 
