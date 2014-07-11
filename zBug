@@ -66,6 +66,8 @@ class Debugger(QtCore.QObject):
   processAppendedToStderr = QtCore.Signal(basestring)
   threadChanged = QtCore.Signal(lldb.SBThread)
   frameChanged = QtCore.Signal(lldb.SBFrame)
+  breakpointsChanged = QtCore.Signal()
+  watchpointsChanged = QtCore.Signal()
 
   def __init__(self):
     QtCore.QObject.__init__(self)
@@ -77,6 +79,8 @@ class Debugger(QtCore.QObject):
     self.__process = None
     self.__thread = None
     self.__frame = None
+
+    self.__targetListener = None
 
     # [andrew 20140124] for LLDB's own logging messages, enabling different types of these
     # is done via the console using "log enable <type> <subtype/all>"
@@ -97,6 +101,13 @@ class Debugger(QtCore.QObject):
   def thread(self):
     return self.__thread
 
+  def setThread(self, thread):
+    self.__process.SetSelectedThread(thread)
+    threadChanged = thread != self.__thread
+    self.__thread = thread
+    if threadChanged:
+      self.threadChanged.emit(thread)
+
   def frame(self):
     return self.__frame
 
@@ -109,17 +120,38 @@ class Debugger(QtCore.QObject):
 
   def handleEvents(self):
     event = lldb.SBEvent()
+
+    if self.__targetListener:
+      while self.__targetListener.GetNextEvent(event):
+        # stream = lldb.SBStream()
+        # event.GetDescription(stream)
+        # print stream.GetData()
+
+        eventType = event.GetType()
+        if eventType == lldb.SBTarget.eBroadcastBitBreakpointChanged:
+          self.breakpointsChanged.emit()
+        elif eventType == lldb.SBTarget.eBroadcastBitWatchpointChanged:
+          self.watchpointsChanged.emit()
+
     listener = self.__debugger.GetListener()
     while listener.GetNextEvent(event):
       # stream = lldb.SBStream()
       # event.GetDescription(stream)
       # print stream.GetData()
 
-      if event.GetBroadcaster().GetName() == "lldb.process":
+      if event.GetBroadcaster().GetName() == lldb.SBProcess.GetBroadcasterClassName():
         target = self.__debugger.GetSelectedTarget()
         targetChanged = self.__target != target
         self.__target = target
         if targetChanged:
+          if target:
+            self.__targetListener = lldb.SBListener("targetListener")
+            target.GetBroadcaster().AddListener(
+              self.__targetListener,
+              lldb.SBTarget.eBroadcastBitBreakpointChanged | lldb.SBTarget.eBroadcastBitWatchpointChanged
+              )
+          else:
+            self.__targetListener = None
           self.__process = None
           self.__thread = None
           self.__frame = None
@@ -543,9 +575,6 @@ class SourceWidget(QtGui.QWidget):
         bottom = top + int(self.blockBoundingRect(block).height())
         blockNumber = blockNumber + 1
 
-    def updateDisplay(self):
-      self.updateExtraSelections()
-
     def updateExtraSelections(self):
       document = self.document()
 
@@ -852,12 +881,10 @@ class SourceWidget(QtGui.QWidget):
       pathname = ""
     line = lineEntry.GetLine()
     self.focusPathnameAndLine(pathname, line)
+    self.__codeWidget.updateExtraSelections()
 
   def breakpointsChanged(self):
     self.__codeWidget.updateExtraSelections()
-
-  def updateDisplay(self):
-    self.__codeWidget.updateDisplay()
 
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
 
@@ -1182,7 +1209,7 @@ class StackWidget(TreeWidget):
       if thread:
         debugger.setFrame(frameIndex)
 
-  def updateDisplay(self):
+  def frameChanged(self):
     self.setCurrentItem(None)
     enabled = False
 
@@ -1219,7 +1246,7 @@ class StackWidget(TreeWidget):
 
 stackWidget = StackWidget()
 stackWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-debugger.frameChanged.connect(stackWidget.updateDisplay)
+debugger.frameChanged.connect(stackWidget.frameChanged)
 debugger.processRunning.connect(lambda: stackWidget.setEnabled(False))
 debugger.processStopped.connect(lambda: stackWidget.setEnabled(True))
 debugger.processExited.connect(lambda: stackWidget.setEnabled(False))
@@ -1247,6 +1274,7 @@ class ThreadsWidgetItem(QtGui.QTreeWidgetItem):
     self.setFont(3, fixedFont)
 
 class ThreadsWidget(TreeWidget):
+
   def __init__(self, stackWidget):
     TreeWidget.__init__(self, "threads")
 
@@ -1271,11 +1299,10 @@ class ThreadsWidget(TreeWidget):
           process = target.GetProcess()
           if process and process.IsValid and process.GetState() == lldb.eStateStopped:
             thread = process.GetThreadAtIndex(int(threadIndex))
-            process.SetSelectedThread(thread)
-            self.__stackWidget.updateDisplay()
+            debugger.setThread(thread)
     self.currentItemChanged.connect(currentItemChanged)
 
-  def updateDisplay(self):
+  def refresh(self):
     self.setCurrentItem(None)
     self.__process = None
     enabled = False
@@ -1306,9 +1333,10 @@ class ThreadsWidget(TreeWidget):
 
 threadsWidget = ThreadsWidget(stackWidget)
 threadsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-debugger.processRunning.connect(threadsWidget.updateDisplay)
-debugger.processStopped.connect(threadsWidget.updateDisplay)
-debugger.processExited.connect(threadsWidget.updateDisplay)
+debugger.threadChanged.connect(threadsWidget.refresh)
+debugger.processRunning.connect(threadsWidget.refresh)
+debugger.processStopped.connect(threadsWidget.refresh)
+debugger.processExited.connect(threadsWidget.refresh)
 
 class AppendingTextWidget(QtGui.QTextEdit):
   def __init__(self):
@@ -1431,9 +1459,8 @@ class BreakpointsWidget(TreeWidget):
           debugger.target().BreakpointDelete(bpid)
           del self.__breakpoints[bpid]
           break
-    self.updateDisplay()
 
-  def updateDisplay(self):
+  def breakpointsChanged(self):
     self.clear()
     target = debugger.target()
     if target and target.IsValid():
@@ -1442,7 +1469,6 @@ class BreakpointsWidget(TreeWidget):
         item.setText(0, str(bp.id))
         item.setText(1, str(bp))
         self.addTopLevelItem(item)
-    self.__sourceWidget.updateDisplay()
 
 lldbDisplay = LLDBDisplay()
 lldbDisplay.setFocusPolicy(QtCore.Qt.NoFocus)
@@ -1512,8 +1538,6 @@ class LLDBCommandWidget(QtGui.QLineEdit):
       self.__lldbDisplay.appendDebuggerErrorOutput(return_obj.GetError())
     self.__history.append(command)
     self.__historyPos = len(self.__history)
-    breakpointsWidget.updateDisplay()
-    watchpointsWidget.updateDisplay()
 
 lldbCommandWidget = LLDBCommandWidget(
   debugger.commandInterpreter(),
@@ -1521,9 +1545,11 @@ lldbCommandWidget = LLDBCommandWidget(
   )
 
 sourceWidget = SourceWidget(debugger, lldbCommandWidget)
+debugger.breakpointsChanged.connect(sourceWidget.breakpointsChanged)
 debugger.frameChanged.connect(sourceWidget.frameChanged)
 
 breakpointsWidget = BreakpointsWidget(sourceWidget)
+debugger.breakpointsChanged.connect(breakpointsWidget.breakpointsChanged)
 sourceWidget.lineClicked.connect(breakpointsWidget.toggleBreakpoint)
 
 class DisassemblyWidget(QtGui.QWidget):
@@ -1700,7 +1726,7 @@ class WatchpointsWidget(QtGui.QWidget):
         "Condition",
         ])
 
-    def updateDisplay(self):
+    def watchpointsChanged(self):
       self.clear()
       target = debugger.target()
       if target and target.IsValid():
@@ -1715,6 +1741,8 @@ class WatchpointsWidget(QtGui.QWidget):
 
   def __init__(self, lldbCommandWidget):
     QtGui.QWidget.__init__(self)
+
+    self.setFocusPolicy(QtCore.Qt.NoFocus)
 
     self.__list = WatchpointsWidget.List()
 
@@ -1746,11 +1774,11 @@ class WatchpointsWidget(QtGui.QWidget):
   def restoreState(self, settings):
     self.__list.restoreState(settings)
 
-  def updateDisplay(self):
-    self.__list.updateDisplay()
+  def watchpointsChanged(self):
+    self.__list.watchpointsChanged()
 
 watchpointsWidget = WatchpointsWidget(lldbCommandWidget)
-watchpointsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
+debugger.watchpointsChanged.connect(watchpointsWidget.watchpointsChanged)
 
 lldbCommandLayout = QtGui.QHBoxLayout()
 lldbCommandLayout.setContentsMargins(4, 3, 4, 3)
@@ -2044,7 +2072,6 @@ if options.pid is not None:
   lldbCommandWidget.executeCommand(
     "process attach --pid=%s" % options.pid
     )
-  threadsWidget.updateDisplay()
 else:
   if len(arguments) < 1:
     parser.print_help()
