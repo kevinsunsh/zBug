@@ -458,13 +458,14 @@ class SourceWidget(QtGui.QWidget):
 
   class CodeWidget(QtGui.QPlainTextEdit):
 
-    def __init__(self, debugger):
+    pathnameChanged = QtCore.Signal(basestring)
+    lineClicked = QtCore.Signal(basestring, int)
+
+    def __init__(self):
       QtGui.QPlainTextEdit.__init__(self)
 
       self.setFocusPolicy(QtCore.Qt.NoFocus)
       self.setMinimumSize(40, 30)
-
-      self.__pathname = None
 
       self.setReadOnly(True)
       self.setFont(preferences.fixedFont())
@@ -474,8 +475,8 @@ class SourceWidget(QtGui.QWidget):
       lineNumberArea = LineNumberArea(self)
       self.__lineNumberArea = lineNumberArea
 
-      self.__highlightLine = 0
-      self.__breakpointLines = []
+      self.__pathname = None
+      self.pathnameChanged.connect(self.updateExtraSelections)
 
       def updateLineNumberAreaWidth(newBlockCount):
         self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
@@ -492,11 +493,6 @@ class SourceWidget(QtGui.QWidget):
       self.updateRequest.connect(updateLineNumberArea)
 
       updateLineNumberAreaWidth(0)
-
-      self.__breakpointsWidget = None
-      self.updateDisplay("", 0)
-
-      debugger.frameChanged.connect(self.frameChanged)
 
     def pathname(self):
       return self.__pathname
@@ -518,16 +514,12 @@ class SourceWidget(QtGui.QWidget):
         digits = digits + 1
       return 3 + self.fontMetrics().width('9') * digits + 3
 
-    def setBreakpointsWidget(self, widget):
-      self.__breakpointsWidget = widget
-
     def lineNumberAreaClickEvent(self, event):
       firstBlock = self.firstVisibleBlock()
       blockHeight = self.blockBoundingRect(firstBlock).height()
       blockNum = int(event.y() / blockHeight) + firstBlock.blockNumber()
       lineNum = blockNum+1
-      if self.__breakpointsWidget is not None:
-        self.__breakpointsWidget.toggleBreakpoint(self.__pathname, lineNum)
+      self.lineClicked.emit(self.__pathname, lineNum)
 
     def lineNumberAreaPaintEvent(self, event):
       lineNumberArea = self.__lineNumberArea
@@ -551,49 +543,67 @@ class SourceWidget(QtGui.QWidget):
         bottom = top + int(self.blockBoundingRect(block).height())
         blockNumber = blockNumber + 1
 
-    def markBreakpointLines(self, lines):
-      self.__breakpointLines = lines
-      self.addHighlights()
+    def updateDisplay(self):
+      self.updateExtraSelections()
 
-    def highlightLine(self, lineNumber):
-      self.__highlightLine = lineNumber
-      self.addHighlights()
-
-    def addHighlights(self):
-      selections = []
+    def updateExtraSelections(self):
       document = self.document()
 
-      for lineNumber in self.__breakpointLines:
-        block = document.findBlockByLineNumber(lineNumber)
-        textCursor = self.textCursor()
-        textCursor.setPosition(block.position())
-        self.setTextCursor(textCursor)
+      selections = []
 
-        selection = QtGui.QTextEdit.ExtraSelection()
-        lineColor = QtGui.QColor(QtCore.Qt.red).lighter(160)
-        selection.format.setBackground(lineColor)
-        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-        selection.cursor = textCursor
-        selection.cursor.clearSelection()
-        selections.append(selection)
+      target = debugger.target()
+      if target and target.IsValid():
+        for i in range(0, target.GetNumBreakpoints()):
+          breakpoint = target.GetBreakpointAtIndex(i)
+          for j in range(0, breakpoint.GetNumLocations()):
+            breakpointLocation = breakpoint.GetLocationAtIndex(j)
+            address = breakpointLocation.GetAddress()
+            if address and address.IsValid():
+              lineEntry = address.GetLineEntry()
+              fileSpec = lineEntry.GetFileSpec()
+              if fileSpec.GetFilename():
+                pathname = str(fileSpec)
+                if pathname == self.__pathname:
+                  line = lineEntry.GetLine()
+                  block = document.findBlockByLineNumber(line - 1)
+                  textCursor = self.textCursor()
+                  textCursor.setPosition(block.position())
+                  selection = QtGui.QTextEdit.ExtraSelection()
+                  lineColor = QtGui.QColor(QtCore.Qt.red).lighter(160)
+                  selection.format.setBackground(lineColor)
+                  selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+                  selection.cursor = textCursor
+                  selection.cursor.clearSelection()
+                  selections.append(selection)
 
-      if self.__highlightLine > 0:
-        block = document.findBlockByLineNumber(self.__highlightLine)
-        textCursor = self.textCursor()
-        textCursor.setPosition(block.position())
-        self.setTextCursor(textCursor)
-
-        selection = QtGui.QTextEdit.ExtraSelection()
-        lineColor = QtGui.QColor(QtCore.Qt.yellow).lighter(160)
-        selection.format.setBackground(lineColor)
-        selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
-        selection.cursor = textCursor
-        selection.cursor.clearSelection()
-        selections.append(selection)
+      frame = debugger.frame()
+      if frame and frame.IsValid():
+        lineEntry = frame.GetLineEntry()
+        fileSpec = lineEntry.GetFileSpec()
+        if fileSpec.GetFilename():
+          pathname = str(fileSpec)
+          if pathname == self.__pathname:
+            line = lineEntry.GetLine()
+            block = document.findBlockByLineNumber(line - 1)
+            textCursor = self.textCursor()
+            textCursor.setPosition(block.position())
+            selection = QtGui.QTextEdit.ExtraSelection()
+            lineColor = QtGui.QColor(QtCore.Qt.yellow).lighter(160)
+            selection.format.setBackground(lineColor)
+            selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            selection.cursor = textCursor
+            selection.cursor.clearSelection()
+            selections.append(selection)
 
       self.setExtraSelections(selections)
 
-    def updateDisplay(self, pathname, lineNumber):
+    def scrollToLine(self, line):
+      block = self.document().findBlockByLineNumber(line)
+      textCursor = self.textCursor()
+      textCursor.setPosition(block.position())
+      self.setTextCursor(textCursor)
+
+    def setPathname(self, pathname):
       newPathname = self.__pathname != self.pathname
       self.__pathname = pathname
 
@@ -621,23 +631,8 @@ class SourceWidget(QtGui.QWidget):
         self.setPlainText("No source code for this location")
         lineNumber = 0
 
-      if lineNumber >= 1:
-        self.highlightLine(lineNumber - 1)
-      else:
-        self.highlightLine(0)
-
-      if self.__breakpointsWidget is not None:
-        self.__breakpointsWidget.markBreakpoints()
-
-    def frameChanged(self, frame):
-      lineEntry = frame.GetLineEntry()
-      fileSpec = lineEntry.GetFileSpec()
-      if fileSpec.GetFilename():
-        pathname = str(fileSpec)
-      else:
-        pathname = ""
-      lineNumber = lineEntry.GetLine()
-      self.updateDisplay(pathname, lineNumber)
+      if newPathname:
+        self.pathnameChanged.emit(self.__pathname)
 
   class FileSelfListWidgetItem(QtGui.QListWidgetItem):
 
@@ -701,7 +696,10 @@ class SourceWidget(QtGui.QWidget):
           return True
       return QtGui.QListWidget.event(self, event)
 
+  lineClicked = QtCore.Signal(basestring, int)
+
   def __init__(self, debugger, lldbCommandWidget):
+
     QtGui.QWidget.__init__(self)
 
     toolBar = QtGui.QToolBar()
@@ -731,7 +729,8 @@ class SourceWidget(QtGui.QWidget):
     debugger.processStopped.connect(lambda: stepOutAction.setEnabled(True))
     debugger.processExited.connect(lambda: stepOutAction.setEnabled(False))
 
-    self.__codeWidget = SourceWidget.CodeWidget(debugger)
+    self.__codeWidget = SourceWidget.CodeWidget()
+    self.__codeWidget.lineClicked.connect(lambda pathname, line: self.lineClicked.emit(pathname, line))
 
     self.__fileSelLineEdit = SourceWidget.FileSelLineEdit(self)
     self.__fileSelLineEdit.afterFocusIn.connect(self.showFileSelList)
@@ -770,9 +769,6 @@ class SourceWidget(QtGui.QWidget):
   def markBreakpointLines(self, lines):
     self.__codeWidget.markBreakpointLines(lines)
 
-  def setBreakpointsWidget(self, breakpointsWidget):
-    self.__codeWidget.setBreakpointsWidget(breakpointsWidget)
-
   def setTitle(self, title):
     self.parent().setTitle(title)
 
@@ -783,7 +779,7 @@ class SourceWidget(QtGui.QWidget):
     pass
 
   def showPathname(self, pathname):
-    self.__codeWidget.updateDisplay(pathname, 0)
+    self.__codeWidget.setPathname(pathname)
     self.__fileSelLineEdit.setText(pathname)
 
   def maybeHideFileSelList(self):
@@ -845,7 +841,28 @@ class SourceWidget(QtGui.QWidget):
 
     self.__fileSelLineEdit.setFocus()
 
+  def focusPathnameAndLine(self, pathname, line):
+    self.__codeWidget.setPathname(pathname)
+    self.__codeWidget.scrollToLine(line)
+
+  def frameChanged(self, frame):
+    lineEntry = frame.GetLineEntry()
+    fileSpec = lineEntry.GetFileSpec()
+    if fileSpec.GetFilename():
+      pathname = str(fileSpec)
+    else:
+      pathname = ""
+    line = lineEntry.GetLine()
+    self.focusPathnameAndLine(pathname, line)
+
+  def breakpointsChanged(self):
+    self.__codeWidget.updateExtraSelections()
+
+  def updateDisplay(self):
+    self.__codeWidget.updateDisplay()
+
 class ValueWidgetItem(QtGui.QTreeWidgetItem):
+
   def __init__(self, includeExtras):
     QtGui.QTreeWidgetItem.__init__(self)
 
@@ -1383,6 +1400,8 @@ class BreakpointsWidget(TreeWidget):
 
   def __init__(self, sourceCodeDisplay):
     TreeWidget.__init__(self, "breakpoints")
+    
+    self.setFocusPolicy(QtCore.Qt.NoFocus)
 
     self.__breakpoints = {}
     self.__sourceWidget = sourceCodeDisplay
@@ -1399,8 +1418,7 @@ class BreakpointsWidget(TreeWidget):
       if not self.__breakpoints.has_key(bpid):
         return
       bp = self.__breakpoints[bpid]
-      self.__sourceWidget.updateDisplay(bp.pathname, bp.line)
-      self.markBreakpoints()
+      self.__sourceWidget.focusPathnameAndLine(bp.pathname, bp.line)
     self.itemClicked.connect(itemWasClicked)
 
   def toggleBreakpoint(self, pathname, lineNum):
@@ -1426,16 +1444,7 @@ class BreakpointsWidget(TreeWidget):
         item.setText(0, str(bp.id))
         item.setText(1, str(bp))
         self.addTopLevelItem(item)
-    self.markBreakpoints()
-
-  def markBreakpoints(self):
-    lines = []
-    # [andrew 20140123] FIXME incorrectly assume unique filenames
-    currentPathname = self.__sourceWidget.pathname()
-    for bpid, bp in self.__breakpoints.iteritems():
-      if bp.pathname == currentPathname:
-        lines.append(bp.line-1)
-    self.__sourceWidget.markBreakpointLines(lines)
+    self.__sourceWidget.updateDisplay()
 
 lldbDisplay = LLDBDisplay()
 lldbDisplay.setFocusPolicy(QtCore.Qt.NoFocus)
@@ -1514,10 +1523,10 @@ lldbCommandWidget = LLDBCommandWidget(
   )
 
 sourceWidget = SourceWidget(debugger, lldbCommandWidget)
+debugger.frameChanged.connect(sourceWidget.frameChanged)
 
 breakpointsWidget = BreakpointsWidget(sourceWidget)
-breakpointsWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-sourceWidget.setBreakpointsWidget(breakpointsWidget)
+sourceWidget.lineClicked.connect(breakpointsWidget.toggleBreakpoint)
 
 class DisassemblyWidget(QtGui.QWidget):
 
