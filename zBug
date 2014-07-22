@@ -869,6 +869,7 @@ class SourceWidget(QtGui.QWidget):
     self.__fileSelLineEdit.setFocus()
 
   def focusPathnameAndLine(self, pathname, line):
+    self.__fileSelLineEdit.setText(pathname)
     self.__codeWidget.setPathname(pathname)
     self.__codeWidget.scrollToLine(line)
 
