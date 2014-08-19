@@ -107,7 +107,9 @@ class Debugger(QtCore.QObject):
     self.__thread = thread
     if threadChanged:
       self.threadChanged.emit(thread)
-
+      self.__frame = thread.GetSelectedFrame()
+      self.frameChanged.emit(self.__frame)
+    
   def frame(self):
     return self.__frame
 
