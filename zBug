@@ -1141,37 +1141,35 @@ class StackWidget(TreeWidget):
         debugger.setFrame(frameIndex)
 
   def frameChanged(self):
-    self.setCurrentItem(None)
-    enabled = False
+    try:
+      self.currentItemChanged.disconnect()
+    except:
+      pass
 
+    enabled = False
     thread = debugger.thread()
     if thread and thread.IsValid():
       process = thread.GetProcess()
       if process.GetState() == lldb.eStateStopped:
-        count = thread.GetNumFrames()
-        if count > 0:
-          selectedFrame = thread.GetSelectedFrame()
-          selectedFrameID = selectedFrame.GetFrameID()
+        self.clear()
+        selectedFrameIdx = thread.GetSelectedFrame().idx
+        selectedItem = None
+        for frame in thread.frames:
+          stackWidgetItem = StackWidgetItem(frame)
+          if frame.idx == selectedFrameIdx:
+            print "SELECT %u" % frame.idx
+            selectedItem = stackWidgetItem
+          self.addTopLevelItem(stackWidgetItem)
 
-          try:
-            self.currentItemChanged.disconnect()
-          except:
-            pass
-          self.clear()
+        if selectedItem:
+          self.setCurrentItem(selectedItem)
 
-          for i in range(0, count):
-            frame = thread.GetFrameAtIndex(i)
-            stackWidgetItem = StackWidgetItem(frame)
-            self.addTopLevelItem(stackWidgetItem)
-            if frame.GetFrameID() == selectedFrameID:
-              self.setCurrentItem(stackWidgetItem)
+        self.resizeColumnToContents(0)
+        self.resizeColumnToContents(1)
 
-          self.resizeColumnToContents(0)
-          self.resizeColumnToContents(1)
+        self.currentItemChanged.connect(self.syncToSelectedItem)
 
-          self.currentItemChanged.connect(self.syncToSelectedItem)
-
-          enabled = True
+        enabled = True
 
     self.setEnabled(enabled)
 
