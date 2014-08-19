@@ -1095,22 +1095,35 @@ registersWidget.setFocusPolicy(QtCore.Qt.NoFocus)
 debugger.frameChanged.connect(registersWidget.setFrame)
 
 class StackWidgetItem(QtGui.QTreeWidgetItem):
-  def __init__(self, frame):
+  def __init__(self, index, frame):
     QtGui.QTreeWidgetItem.__init__(self)
 
-    self.__frame = frame
+    self.__index = index
 
     self.setFonts(preferences.fixedFont())
     preferences.fixedFontChanged.connect(self.setFonts)
 
     self.setTextAlignment(1, QtCore.Qt.AlignRight)
 
-    self.setText(0, "%d" % frame.GetFrameID())
-    self.setText(1, "%#x" % frame.GetPC())
-    self.setText(2, "%s" % (frame.GetFunctionName()))
+    self.setFrame(frame)
+
+  def index(self):
+    return self.__index
 
   def frame(self):
     return self.__frame
+
+  def setFrame(self, frame):
+    self.__frame = frame
+
+    if frame:
+      self.setText(0, "%d" % frame.GetFrameID())
+      self.setText(1, "%#x" % frame.GetPC())
+      self.setText(2, "%s" % (frame.GetFunctionName()))
+    else:
+      self.setText(0, "")
+      self.setText(1, "")
+      self.setText(2, "")
 
   def setFonts(self, fixedFont):
     self.setFont(0, fixedFont)
@@ -1131,47 +1144,37 @@ class StackWidget(TreeWidget):
       "Location"
     ])
 
+    for i in range(0, 63):
+      self.addTopLevelItem(StackWidgetItem(i, None))
+
+    self.currentItemChanged.connect(self.syncToSelectedItem)
+
   def syncToSelectedItem(self):
-    frame = None
     currentItem = self.currentItem()
-    if currentItem:
-      frameIndex = self.indexOfTopLevelItem(currentItem)
+    if currentItem and currentItem.frame():
+      index = currentItem.index()
       thread = debugger.thread()
       if thread:
-        debugger.setFrame(frameIndex)
+        debugger.setFrame(index)
 
   def frameChanged(self):
-    try:
-      self.currentItemChanged.disconnect()
-    except:
-      pass
+    for i in range(0, 63):
+      self.topLevelItem(i).setFrame(None)
 
-    enabled = False
     thread = debugger.thread()
     if thread and thread.IsValid():
       process = thread.GetProcess()
       if process.GetState() == lldb.eStateStopped:
-        self.clear()
+        count = thread.GetNumFrames()
         selectedFrameIdx = thread.GetSelectedFrame().idx
-        selectedItem = None
-        for frame in thread.frames:
-          stackWidgetItem = StackWidgetItem(frame)
-          if frame.idx == selectedFrameIdx:
-            print "SELECT %u" % frame.idx
-            selectedItem = stackWidgetItem
-          self.addTopLevelItem(stackWidgetItem)
+        for index in range(0, count):
+          item = self.topLevelItem(index)
+          item.setFrame(thread.GetFrameAtIndex(index))
+          if index == selectedFrameIdx:
+            self.setCurrentItem(item)
 
-        if selectedItem:
-          self.setCurrentItem(selectedItem)
-
-        self.resizeColumnToContents(0)
-        self.resizeColumnToContents(1)
-
-        self.currentItemChanged.connect(self.syncToSelectedItem)
-
-        enabled = True
-
-    self.setEnabled(enabled)
+    self.resizeColumnToContents(0)
+    self.resizeColumnToContents(1)
 
 stackWidget = StackWidget()
 stackWidget.setFocusPolicy(QtCore.Qt.NoFocus)
