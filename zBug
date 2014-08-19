@@ -58,7 +58,6 @@ except ImportError:
 class Debugger(QtCore.QObject):
 
   targetChanged = QtCore.Signal(lldb.SBTarget)
-  processChanged = QtCore.Signal(lldb.SBProcess)
   processRunning = QtCore.Signal(lldb.SBProcess)
   processStopped = QtCore.Signal(lldb.SBProcess)
   processExited = QtCore.Signal(lldb.SBProcess)
@@ -109,7 +108,7 @@ class Debugger(QtCore.QObject):
       self.threadChanged.emit(thread)
       self.__frame = thread.GetSelectedFrame()
       self.frameChanged.emit(self.__frame)
-    
+
   def frame(self):
     return self.__frame
 
@@ -159,11 +158,7 @@ class Debugger(QtCore.QObject):
           self.__frame = None
 
         process = target.GetProcess()
-        processChanged = self.__process != process
         self.__process = process
-        if processChanged:
-          self.__thread = None
-          self.__frame = None
 
         eventType = event.GetType()
         if eventType == lldb.SBProcess.eBroadcastBitSTDOUT:
@@ -282,8 +277,6 @@ class Debugger(QtCore.QObject):
 
           if targetChanged:
             self.targetChanged.emit(self.__target)
-          if processChanged:
-            self.processChanged.emit(self.__process)
           if threadChanged:
             self.threadChanged.emit(self.__thread)
           if frameChanged:
@@ -1359,6 +1352,13 @@ class AppendingTextWidget(QtGui.QTextEdit):
     self.setTextCursor(textCursor)
     self.ensureCursorVisible()
 
+  def appendSeparator(self):
+    textCursor = self.textCursor()
+    textCursor.movePosition(QtGui.QTextCursor.End)
+    textCursor.insertHtml("<hr /><br />")
+    self.setTextCursor(textCursor)
+    self.ensureCursorVisible()
+
 class OutputWidget(AppendingTextWidget):
   def __init__(self, debugger):
     AppendingTextWidget.__init__(self)
@@ -1385,6 +1385,7 @@ class OutputWidget(AppendingTextWidget):
 
   def appendStderr(self, text):
     self.append(text, self.__stderrColor, self.__stderrBGColor)
+    self.appendSeparator()
 
 outputWidget = OutputWidget(debugger)
 
@@ -1792,8 +1793,11 @@ lldbCommandLayout.addWidget(lldbCommandWidget)
 toolBar = QtGui.QToolBar()
 toolBar.setIconSize(QtCore.QSize(20, 20))
 
+def restart():
+  outputWidget.appendSeparator()
+  lldbCommandWidget.executeCommand("process launch")    
 restartAction = toolBar.addAction(QtGui.QIcon(os.path.join(zBugPath, "rsrc", "restart.png")), "Restart")
-restartAction.triggered.connect(lambda: lldbCommandWidget.executeCommand("process launch"))
+restartAction.triggered.connect(restart)
 debugger.processRunning.connect(lambda: restartAction.setEnabled(False))
 debugger.processStopped.connect(lambda: restartAction.setEnabled(True))
 debugger.processExited.connect(lambda: restartAction.setEnabled(True))
