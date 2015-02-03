@@ -440,6 +440,8 @@ class SourceWidget(QtGui.QWidget):
       self.__pathname = None
       self.pathnameChanged.connect(self.updateExtraSelections)
 
+      self.__clickedLines = {}
+
       def updateLineNumberAreaWidth(newBlockCount):
         self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
       self.blockCountChanged.connect(updateLineNumberAreaWidth)
@@ -481,6 +483,11 @@ class SourceWidget(QtGui.QWidget):
       blockHeight = self.blockBoundingRect(firstBlock).height()
       blockNum = int(event.y() / blockHeight) + firstBlock.blockNumber()
       lineNum = blockNum+1
+      if not self.__pathname in self.__clickedLines:
+        self.__clickedLines[self.__pathname] = {lineNum: False}
+      if not lineNum in self.__clickedLines[self.__pathname]:
+        self.__clickedLines[self.__pathname][lineNum] = False
+      self.__clickedLines[self.__pathname][lineNum] = not self.__clickedLines[self.__pathname][lineNum]
       self.lineClicked.emit(self.__pathname, lineNum)
 
     def lineNumberAreaPaintEvent(self, event):
@@ -510,6 +517,20 @@ class SourceWidget(QtGui.QWidget):
 
       selections = []
 
+      if self.__pathname in self.__clickedLines:
+        for line, clicked in self.__clickedLines[self.__pathname].iteritems():
+          if clicked:
+            block = document.findBlockByLineNumber(line - 1)
+            textCursor = self.textCursor()
+            textCursor.setPosition(block.position())
+            selection = QtGui.QTextEdit.ExtraSelection()
+            lineColor = QtGui.QColor(QtCore.Qt.red).lighter(180)
+            selection.format.setBackground(lineColor)
+            selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            selection.cursor = textCursor
+            selection.cursor.clearSelection()
+            selections.append(selection)
+
       target = debugger.target()
       if target and target.IsValid():
         for i in range(0, target.GetNumBreakpoints()):
@@ -528,7 +549,7 @@ class SourceWidget(QtGui.QWidget):
                   textCursor = self.textCursor()
                   textCursor.setPosition(block.position())
                   selection = QtGui.QTextEdit.ExtraSelection()
-                  lineColor = QtGui.QColor(QtCore.Qt.red).lighter(160)
+                  lineColor = QtGui.QColor(QtCore.Qt.red).lighter(140)
                   selection.format.setBackground(lineColor)
                   selection.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
                   selection.cursor = textCursor
@@ -778,10 +799,10 @@ class SourceWidget(QtGui.QWidget):
       for j in range(0, compileUnitCount):
         compileUnit = module.GetCompileUnitAtIndex(j)
         fileSpec = compileUnit.GetFileSpec()
-        filename = fileSpec.GetFilename()
-        if not filename:
-          continue
         directory = fileSpec.GetDirectory()
+        filename = fileSpec.GetFilename()
+        if not directory or not filename:
+          continue
         pathname = os.path.join(directory, filename)
         if len(filterText) == 0 or filterText in pathname:
           self.__fileSelListWidget.addItem(SourceWidget.FileSelfListWidgetItem(pathname))
@@ -1957,6 +1978,7 @@ if config['connectFabric']:
       if not self.connected:
         try:
           self.sock.connect(('127.0.0.1', 3132))
+          self.sock.setblocking(0)
           self.connected = True
           lldbDisplay.appendDebuggerOutput("Connected to Fabric Engine process\n")
         except Exception as e:
@@ -1965,21 +1987,14 @@ if config['connectFabric']:
       (r,w,x) = select.select([self.sock.fileno()], [], [], timeout)
       didRead = False
       if len(r) > 0:
-        self.handleMessage(self.readMessage())
+        self.pending += self.sock.recv(20*1024)
+        self.messages += self.pending.split('\n')
+        self.pending = self.messages.pop()
         didRead = True
       while len(self.messages) > 0:
-        self.handleMessage(self.readMessage())
+        self.handleMessage(json.loads(self.messages.pop(0)))
         didRead = True
       return didRead
-
-    def readMessage(self):
-      if len(self.messages) > 0:
-        return json.loads(self.messages.pop(0))
-      while self.pending.find('\n') == -1:
-        self.pending += self.sock.recv(20*1024)
-      self.messages = self.pending.split('\n')
-      self.pending = self.messages.pop()
-      return json.loads(self.messages.pop(0))
 
     def handleMessage(self, data):
       global fabricSourceCode
@@ -2048,6 +2063,12 @@ else:
     lldbCommandWidget.executeCommand(
       "settings set -- target.run-args %s" % (" ".join(map(lambda arg: ("\"%s\"" % arg), arguments[1:])))
       )
+  lldbCommandWidget.executeCommand(
+    "settings set -- target.env-vars FABRIC_DEBUG=2"
+    )
+  lldbCommandWidget.executeCommand(
+    "settings set -- target.env-vars FABRIC_OPT_TYPE=2"
+    )
   lldbCommandWidget.executeCommand(
     "process launch --stop-at-entry"
     )
