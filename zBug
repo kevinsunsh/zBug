@@ -2,10 +2,21 @@
 
 import sys, os, platform, commands, stat, signal, optparse
 import json, select, socket
-from PySide import QtCore, QtGui
 from difflib import SequenceMatcher
 
 zBugPath = os.path.dirname(os.path.realpath(sys.argv[0]))
+
+platform_system = platform.system()
+if platform_system == 'Linux':
+  pythonDir = os.path.join(zBugPath, 'lib', 'python%u.%u'%(sys.version_info[0], sys.version_info[1]), 'site-packages')
+  sys.path.append(pythonDir)
+  from ctypes import *
+  cdll.LoadLibrary(os.path.join(pythonDir, 'PySide', 'libshiboken-1.1-CPSafeQtPy26-python2.6.so.1.1'))
+  cdll.LoadLibrary(os.path.join(pythonDir, 'PySide', 'libQtCore_CPSafePy26.so.4'))
+  cdll.LoadLibrary(os.path.join(pythonDir, 'PySide', 'libQtGui_CPSafePy26.so.4'))
+  cdll.LoadLibrary(os.path.join(pythonDir, 'PySide', 'libpyside-1.1-CPSafeQtPy26-python2.6.so.1.1'))
+
+from PySide import QtCore, QtGui
 
 config = {
   # assume that we're debugging a Fabric app and try to connect
@@ -31,7 +42,6 @@ try:
 except ImportError:
   lldb_python_dirs = list()
   # lldb is not in the PYTHONPATH, try some defaults for the current platform
-  platform_system = platform.system()
   if platform_system == 'Darwin':
     # On Darwin, try the currently selected Xcode directory
     xcode_dir = commands.getoutput("xcode-select --print-path")
